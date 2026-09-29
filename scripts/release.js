@@ -30,7 +30,7 @@ if (token) {
 }
 
 function ghRequest(options, data = null) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const req = https.request({
       ...options,
       headers: {
@@ -49,7 +49,7 @@ function ghRequest(options, data = null) {
         }
       });
     });
-    req.on('error', () => resolve({ statusCode: 500, body: null }));
+    req.on('error', reject);
     if (data) req.write(data);
     req.end();
   });
@@ -72,29 +72,33 @@ try {
 // 2. Pre-crear el release en GitHub para evitar race condition de electron-builder
 let releaseId = null;
 if (token) {
-  const checkRel = await ghRequest({
-    hostname: 'api.github.com',
-    path: `/repos/${repo}/releases/tags/${tag}`,
-    method: 'GET'
-  });
-  if (checkRel.body && checkRel.body.id) {
-    releaseId = checkRel.body.id;
-    console.log(`✓ Release ${tag} ya existente en GitHub (id: ${releaseId}).`);
-  } else {
-    console.log(`📦 Creando release ${tag} en GitHub...`);
-    const createRel = await ghRequest({
+  try {
+    const checkRel = await ghRequest({
       hostname: 'api.github.com',
-      path: `/repos/${repo}/releases`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      tag_name: tag,
-      name: tag,
-      draft: false,
-      prerelease: false
-    }));
-    releaseId = createRel.body?.id;
-    if (releaseId) console.log(`✓ Release ${tag} creado en GitHub (id: ${releaseId}).`);
+      path: `/repos/${repo}/releases/tags/${tag}`,
+      method: 'GET'
+    });
+    if (checkRel.body && checkRel.body.id) {
+      releaseId = checkRel.body.id;
+      console.log(`✓ Release ${tag} ya existente en GitHub (id: ${releaseId}).`);
+    } else {
+      console.log(`📦 Creando release ${tag} en GitHub...`);
+      const createRel = await ghRequest({
+        hostname: 'api.github.com',
+        path: `/repos/${repo}/releases`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        tag_name: tag,
+        name: tag,
+        draft: false,
+        prerelease: false
+      }));
+      releaseId = createRel.body?.id;
+      if (releaseId) console.log(`✓ Release ${tag} creado en GitHub (id: ${releaseId}).`);
+    }
+  } catch (err) {
+    console.error('Aviso comprobando release:', err.message);
   }
 }
 
@@ -113,8 +117,51 @@ try {
   console.log('(electron-builder completado, asegurando artefactos en GitHub...)');
 }
 
-// 5. Verificación y subida automática garantizada de assets de Windows
-async function ensureDesktopAssets() {
+async function uploadAsset(relId, assetName, filePath, contentType = 'application/octet-stream') {
+  if (!fs.existsSync(filePath)) {
+    console.error(`Archivo no encontrado: ${filePath}`);
+    return;
+  }
+  const fileBuf = fs.readFileSync(filePath);
+  const fileSize = fileBuf.length;
+
+  const rel = await ghRequest({
+    hostname: 'api.github.com',
+    path: `/repos/${repo}/releases/${relId}`,
+    method: 'GET'
+  });
+  const assets = rel.body?.assets || [];
+  const existing = assets.find(a => a.name === assetName);
+
+  if (existing) {
+    console.log(`🔄 Reemplazando ${assetName} existente en GitHub...`);
+    await ghRequest({
+      hostname: 'api.github.com',
+      path: `/repos/${repo}/releases/assets/${existing.id}`,
+      method: 'DELETE'
+    });
+  }
+
+  console.log(`⬆ Subiendo ${assetName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)...`);
+  const uploadRes = await ghRequest({
+    hostname: 'uploads.github.com',
+    path: `/repos/${repo}/releases/${relId}/assets?name=${encodeURIComponent(assetName)}`,
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': fileSize
+    }
+  }, fileBuf);
+
+  if (uploadRes.statusCode >= 200 && uploadRes.statusCode < 300) {
+    console.log(`✓ ${assetName} subido.`);
+  } else {
+    console.error(`Error subiendo ${assetName}:`, uploadRes.statusCode, uploadRes.body);
+  }
+}
+
+// 5. Verificación y subida automática garantizada de assets
+async function ensureAllAssets() {
   if (!token) {
     console.log('⚠️ No se encontró token en variables ni en .env');
     return;
@@ -132,7 +179,6 @@ async function ensureDesktopAssets() {
   }
 
   releaseId = res.body.id;
-  const assets = res.body.assets || [];
   const buildDir = 'C:/flashlab-build/release';
 
   let exeName = `FlashLab-Setup-${version}.exe`;
@@ -140,98 +186,23 @@ async function ensureDesktopAssets() {
   if (!fs.existsSync(exePath)) {
     const altExe = `FlashLab Setup ${version}.exe`;
     if (fs.existsSync(path.join(buildDir, altExe))) {
-      exeName = altExe;
       exePath = path.join(buildDir, altExe);
     }
   }
 
-  if (!fs.existsSync(exePath)) {
-    console.log('No se encontró el instalador en ' + buildDir);
-    return;
-  }
-
-  const exeBuf = fs.readFileSync(exePath);
-  const exeSize = exeBuf.length;
-  const sha512 = crypto.createHash('sha512').update(exeBuf).digest('base64');
-
-  // Verificar instalador .exe
-  const hasExe = assets.some(a => a.name === exeName);
-  if (!hasExe) {
-    console.log(`⬆ Subiendo instalador ${exeName} (${(exeSize / 1024 / 1024).toFixed(1)} MB)...`);
-    await ghRequest({
-      hostname: 'uploads.github.com',
-      path: `/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(exeName)}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': exeSize
-      }
-    }, exeBuf);
-    console.log(`✓ ${exeName} subido.`);
-  } else {
-    console.log(`✓ ${exeName} ya está en GitHub.`);
-  }
-
-  // Generar latest.yml exacto con la versión actual y sha512 real
-  const latestYmlContent = `version: ${version}
-files:
-  - url: ${exeName}
-    sha512: ${sha512}
-    size: ${exeSize}
-path: ${exeName}
-sha512: ${sha512}
-releaseDate: '${new Date().toISOString()}'
-`;
-  const ymlBuf = Buffer.from(latestYmlContent, 'utf8');
-
-  // Si existe latest.yml previo, reemplazarlo
-  const oldYmlAsset = assets.find(a => a.name === 'latest.yml');
-  if (oldYmlAsset) {
-    console.log('🔄 Reemplazando latest.yml en GitHub...');
-    await ghRequest({
-      hostname: 'api.github.com',
-      path: `/repos/${repo}/releases/assets/${oldYmlAsset.id}`,
-      method: 'DELETE'
-    });
-  }
-
-  console.log(`⬆ Subiendo latest.yml de v${version}...`);
-  await ghRequest({
-    hostname: 'uploads.github.com',
-    path: `/repos/${repo}/releases/${releaseId}/assets?name=latest.yml`,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': ymlBuf.length
-    }
-  }, ymlBuf);
-  console.log(`✓ latest.yml subido exitosamente.`);
-
-  // Blockmap
   const blockmapName = `${exeName}.blockmap`;
-  const blockmapPath = path.join(buildDir, blockmapName);
-  const hasBlockmap = assets.some(a => a.name === blockmapName);
-  if (fs.existsSync(blockmapPath) && !hasBlockmap) {
-    const bBuf = fs.readFileSync(blockmapPath);
-    await ghRequest({
-      hostname: 'uploads.github.com',
-      path: `/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(blockmapName)}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': bBuf.length
-      }
-    }, bBuf);
-    console.log(`✓ ${blockmapName} subido.`);
+  let blockmapPath = path.join(buildDir, blockmapName);
+  if (!fs.existsSync(blockmapPath)) {
+    blockmapPath = path.join(buildDir, `FlashLab Setup ${version}.exe.blockmap`);
   }
-}
 
-// 6. Buildear y subir el .apk de Android (regla de oro de CLAUDE.md)
-async function buildAndUploadAndroidApk() {
-  if (!releaseId) {
-    console.log('⚠️ No hay releaseId para subir el APK');
-    return;
-  }
+  const ymlPath = path.join(buildDir, 'latest.yml');
+
+  await uploadAsset(releaseId, exeName, exePath);
+  await uploadAsset(releaseId, blockmapName, blockmapPath);
+  await uploadAsset(releaseId, 'latest.yml', ymlPath);
+
+  // 6. Buildear y subir el .apk de Android (regla de oro de CLAUDE.md)
   console.log(`\n🤖 Compilando APK de Android para ${tag}...`);
   try {
     console.log('📱 Sincronizando Capacitor con Android...');
@@ -239,56 +210,20 @@ async function buildAndUploadAndroidApk() {
 
     console.log('🔨 Compilando APK con Gradle (assembleRelease)...');
     const javaHome = 'C:\\Users\\edwar\\dev-tools\\jdk21-home';
-    execSync('cmd.exe /c "gradlew.bat assembleRelease"', {
+    execSync('cmd.exe /c "call gradlew.bat assembleRelease"', {
       cwd: path.resolve('android'),
       stdio: 'inherit',
       env: { ...process.env, JAVA_HOME: javaHome }
     });
 
     const apkPath = path.resolve('android/app/build/outputs/apk/release/app-release.apk');
-    if (!fs.existsSync(apkPath)) {
-      console.log('⚠️ No se encontró app-release.apk en ' + apkPath);
-      return;
-    }
-
     const apkName = `FlashLab-${version}.apk`;
-    const apkBuf = fs.readFileSync(apkPath);
-    const apkSize = apkBuf.length;
-
-    // Verificar si ya existe en GitHub
-    const freshRel = await ghRequest({
-      hostname: 'api.github.com',
-      path: `/repos/${repo}/releases/${releaseId}`,
-      method: 'GET'
-    });
-    const freshAssets = freshRel.body?.assets || [];
-    const oldApk = freshAssets.find(a => a.name === apkName);
-    if (oldApk) {
-      console.log(`🔄 Reemplazando ${apkName} previo en GitHub...`);
-      await ghRequest({
-        hostname: 'api.github.com',
-        path: `/repos/${repo}/releases/assets/${oldApk.id}`,
-        method: 'DELETE'
-      });
-    }
-
-    console.log(`⬆ Subiendo ${apkName} (${(apkSize / 1024 / 1024).toFixed(1)} MB)...`);
-    await ghRequest({
-      hostname: 'uploads.github.com',
-      path: `/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(apkName)}`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/vnd.android.package-archive',
-        'Content-Length': apkSize
-      }
-    }, apkBuf);
-    console.log(`✓ ${apkName} subido exitosamente a GitHub.`);
+    await uploadAsset(releaseId, apkName, apkPath, 'application/vnd.android.package-archive');
   } catch (err) {
     console.error('⚠️ Error al generar o subir el APK de Android:', err.message);
   }
+
+  console.log(`\n✨ ¡Release ${tag} 100% completo en GitHub! Contiene .exe y .apk sincronizados.\n`);
 }
 
-await ensureDesktopAssets();
-await buildAndUploadAndroidApk();
-
-console.log(`\n✨ ¡Release ${tag} 100% completo en GitHub! Contiene .exe y .apk sincronizados.\n`);
+await ensureAllAssets();
