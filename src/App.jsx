@@ -657,7 +657,9 @@ export default function App({ theme, setTheme }) {
   // acciones acá es más simple y no necesita ningún hook nuevo.
   const withSidebarClose = (fn) => (...args) => {
     fn(...args)
-    setSidebarOpen(false)
+    if (isMobile || !sidebarPinned) {
+      setSidebarOpen(false)
+    }
   }
 
   return (
@@ -684,6 +686,8 @@ export default function App({ theme, setTheme }) {
           <Sidebar
             mobile={isMobile}
             open={sidebarOpen}
+            pinned={sidebarPinned}
+            onTogglePin={toggleSidebarPin}
             pages={activePages}
             trashedRoots={trashedRoots}
             currentId={currentId}
