@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reemplaza el splash "legacy" (una imagen completa por densidad, estirada
+     con android:background para llenar la pantalla) — en cualquier aspect
+     ratio distinto al de esa imagen (2:3), que es la enorme mayoría de los
+     celulares modernos (~9:20), Android la deforma para cubrir el ancho/alto
+     completos, lo que se percibía como "pixelado/baja calidad" (reportado).
+     Acá en cambio: color de fondo sólido + el logo centrado a su tamaño
+     natural, sin estirar en ningún eje. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splashBackground" />
+    <item>
+        <bitmap android:src="@drawable/splash_logo" android:gravity="center" />
+    </item>
+</layer-list>

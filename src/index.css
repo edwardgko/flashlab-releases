@@ -1,0 +1,464 @@
+@import "tailwindcss";
+
+/* Dark mode manual (clase .dark en <html>), no solo prefers-color-scheme:
+   lo decide el toggle de tema, que a su vez sigue nativeTheme en Electron. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Sin esto, los controles nativos del navegador (la lista desplegable de
+   <select>, inputs date/time, checkboxes) siguen renderizando en claro pase
+   lo que pase con nuestras clases .dark — Chromium los pinta según
+   color-scheme, no según el CSS de la página. */
+:root {
+  color-scheme: light;
+  /* fondo/borde de la miniatura que sigue al cursor al arrastrar una fila
+     desde la manijita de 6 puntos (ver lib/dragPreview.js) — vive acá y no
+     en el JS porque tiene que seguir el tema, y la clase .dark no se puede
+     consultar desde una property inline. */
+  --drag-preview-bg: #ffffff;
+  --drag-preview-border: rgba(0, 0, 0, 0.12);
+}
+:root.dark {
+  color-scheme: dark;
+  --drag-preview-bg: #262626;
+  --drag-preview-border: rgba(255, 255, 255, 0.16);
+}
+
+/* selección de texto (arrastrar el mouse, Ctrl/Cmd+A): en oscuro el
+   resaltado azul clarito por defecto del navegador queda casi del mismo
+   tono que el texto y se vuelve invisible — fondo y color de texto propios,
+   con contraste garantizado. */
+.dark ::selection {
+  background-color: rgba(59, 130, 246, 0.45);
+  color: #f5f5f5;
+}
+
+/* Texto de las etiquetas de color (Select): un tono del MISMO color en vez
+   de blanco/gris fijo, como en Notion real — más oscuro en claro, más
+   pálido en oscuro. Los dos valores los calcula JS (tint.js) y se pasan acá
+   como variables porque la clase .dark no se puede consultar desde un
+   style={{}} inline. */
+.tag-text {
+  color: var(--tag-text-light);
+}
+.dark .tag-text {
+  color: var(--tag-text-dark);
+}
+
+/* Mismo truco para fondo/borde tintados (tarjetas del tablero, columnas):
+   en oscuro un poco más saturados, en claro más sutiles — ver tagBgStyle(). */
+.tag-bg {
+  background-color: var(--tag-bg-light);
+}
+.dark .tag-bg {
+  background-color: var(--tag-bg-dark);
+}
+.tag-border {
+  border-color: var(--tag-border-light);
+}
+.dark .tag-border {
+  border-color: var(--tag-border-dark);
+}
+
+/* color-scheme solo, en Windows/Electron, no alcanza para que la lista
+   desplegable de <select> se pinte oscura — a los <option> hay que darles
+   fondo/color explícitos, Chromium sí los respeta ahí. */
+.dark select {
+  color-scheme: dark;
+}
+.dark select option {
+  background-color: #262626;
+  color: #e5e5e5;
+}
+
+/* Scrollbar fino y discreto, a tono con el tema (reemplaza el nativo del SO) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.16);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.28);
+  background-clip: padding-box;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+  background-clip: padding-box;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.24);
+  background-clip: padding-box;
+}
+
+/* En pantallas chicas (celular) el mismo scrollbar de 10px pensado para
+   desktop se ve grueso y llamativo, sobre todo en barras horizontales
+   angostas (pestañas, tabs de vista de una base de datos) — más fino y sutil
+   ahí, sin tocar cómo se ve en desktop. */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+}
+
+/* Editor.js limita su contenido a 650px; que use el ancho de nuestra columna
+   para alinear los bloques con el título de la página */
+.ce-block__content,
+.ce-toolbar__content {
+  max-width: none;
+}
+
+/* Tailwind preflight resetea bordes/tipografía de table y textarea;
+   el tool de tabla y el de código quedan sin estilo visible sin esto. */
+.tc-table {
+  --nc-border: #e5e7eb;
+}
+.dark .tc-table {
+  --nc-border: #3f3f3f;
+}
+.tc-row {
+  border-bottom: 1px solid var(--nc-border);
+}
+.tc-cell {
+  border-right: 1px solid var(--nc-border);
+}
+
+.ce-code__textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f4f3ec;
+  border-radius: 0.375rem;
+}
+.dark .ce-code__textarea {
+  background: #262626;
+  color: #e5e5e5;
+}
+
+/* Bloque seleccionado (Cross Block Selection al hacer clic en ⋮⋮): fondo
+   celeste hardcodeado (#e1f2ff) en el propio selector, sin variable — hay
+   que pisar el selector directo, no una custom property. */
+.dark .ce-block--selected .ce-block__content {
+  background: #1e3a52;
+}
+
+.cdx-marker {
+  background: rgba(250, 204, 21, 0.35);
+}
+.dark .cdx-marker {
+  background: rgba(250, 204, 21, 0.25);
+  color: #fefce8;
+}
+
+/* Editor.js no trae tema oscuro nativo: su CSS (popover de "+"/⋮⋮/"Convert
+   to", toolbar inline, tabla) se inyecta una sola vez como <style> con
+   colores claros hardcodeados o en custom properties puestas en el propio
+   selector. Pisamos esas mismas custom properties desde .dark — como se
+   declaran en el selector (no en :root), un override con más especificidad
+   alcanza sin tocar cada regla suelta. Lo que no pasa por variable
+   (.ce-toolbar__plus, hovers de inline tool, tabla) se pisa a mano abajo. */
+.dark .ce-popover,
+.dark .ce-popover--inline {
+  --color-border: #404040;
+  --color-shadow: rgba(0, 0, 0, 0.5);
+  --color-background: #262626;
+  --color-text-primary: #e5e5e5;
+  --color-text-secondary: #a3a3a3;
+  --color-background-item-hover: #333333;
+  --color-background-item-focus: rgba(96, 165, 250, 0.15);
+  --color-background-item-confirm: rgba(248, 113, 113, 0.15);
+  --color-background-icon-active: rgba(96, 165, 250, 0.15);
+  --color-text-icon-active: #60a5fa;
+}
+.dark .ce-popover-item--focused {
+  background: var(--color-background-item-focus) !important;
+}
+.dark .cdx-search-field {
+  background: #1f1f1f;
+}
+.dark .cdx-search-field__input::placeholder {
+  color: #737373;
+}
+.dark .cdx-settings-button--active {
+  color: #60a5fa;
+}
+.dark .cdx-settings-button--focused {
+  background: rgba(96, 165, 250, 0.15);
+}
+
+.dark .ce-inline-toolbar {
+  --color-text-primary: #e5e5e5;
+}
+.dark .ce-inline-tool:hover {
+  background-color: #333333;
+}
+.dark .ce-inline-toolbar__dropdown:hover {
+  background: #333333;
+}
+.dark .ce-inline-toolbar__dropdown {
+  border-right-color: #404040;
+}
+.dark .ce-inline-tool-input {
+  background: #1f1f1f;
+  border-color: #404040;
+  color: #e5e5e5;
+}
+.dark .ce-inline-tool-input::placeholder {
+  color: #737373;
+}
+
+.dark .ce-toolbar__plus,
+.dark .ce-toolbar__settings-btn {
+  color: #a3a3a3;
+}
+.dark .ce-toolbar__plus:hover,
+.dark .ce-toolbar__plus--active,
+.dark .ce-toolbar__settings-btn:hover,
+.dark .ce-toolbar__settings-btn--active {
+  background-color: #333333;
+  color: #e5e5e5;
+}
+
+/* input "Start with" del list tool (@editorjs/list) */
+.dark .cdx-list-start-with-field {
+  background: #1f1f1f;
+  border-color: #404040;
+}
+.dark .cdx-list-start-with-field--invalid {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: #b91c1c;
+}
+.dark .cdx-list-start-with-field__input {
+  color: #e5e5e5;
+}
+
+/* código inline (@editorjs/inline-code) */
+.dark .inline-code {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fca5a5;
+}
+
+/* imagen en carga (@editorjs/image) */
+.dark .image-tool--uploading .image-tool__image {
+  background-color: #262626;
+}
+
+/* botón ✕ para sacar una imagen de la página sin buscar el "Eliminar" del
+   menú "⋮⋮" de tunes (ver src/lib/editorTools/DeletableImageTool.js) */
+.image-tool {
+  position: relative;
+}
+.image-tool__delete-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9999px;
+  background: rgba(55, 65, 81, 0.75);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.image-tool:hover .image-tool__delete-btn {
+  opacity: 1;
+}
+.image-tool__delete-btn:hover {
+  background: rgba(185, 28, 28, 0.9);
+}
+.image-tool--empty .image-tool__delete-btn,
+.image-tool--uploading .image-tool__delete-btn {
+  display: none;
+}
+
+/* popover propio de la tabla (@editorjs/table): "⋮" de fila/columna, no
+   reusa .ce-popover — mismo patrón de variables en su propio selector. */
+.dark .tc-wrap {
+  --color-background: #1f1f1f;
+  --color-text-secondary: #a3a3a3;
+  --color-border: #404040;
+}
+.dark .tc-popover {
+  --color-border: #404040;
+  --color-background: #262626;
+  --color-background-hover: #333333;
+  --color-background-confirm: #b91c1c;
+  --color-background-confirm-hover: #991b1b;
+  --color-text-confirm: #ffffff;
+  color: #e5e5e5;
+}
+.dark .tc-toolbox__toggler {
+  color: #a3a3a3;
+}
+.dark .tc-toolbox__toggler:hover {
+  color: #e5e5e5;
+}
+
+/* Callout: bloque propio (src/lib/editorTools/CalloutTool.js) */
+.callout-block {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: #fdf6e3;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+.dark .callout-block {
+  background: #2d2a1f;
+}
+.callout-icon {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.callout-text {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+}
+.callout-text:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+}
+
+/* Toggle: bloque propio (src/lib/editorTools/ToggleTool.js) */
+.toggle-block {
+  display: flex;
+  flex-direction: column;
+}
+.toggle-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+}
+.toggle-caret {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  transition: transform 0.15s ease;
+  padding: 0;
+}
+.dark .toggle-caret {
+  color: #a3a3a3;
+}
+.toggle-text {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  font-weight: 600;
+}
+.toggle-text:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  font-weight: 400;
+}
+.toggle-body {
+  margin-left: 1.375rem;
+  margin-top: 0.25rem;
+  outline: none;
+  color: #374151;
+}
+.dark .toggle-body {
+  color: #d4d4d4;
+}
+.toggle-body:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+}
+
+/* Enlace interno: PageLinkTool.js */
+.page-link {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 0.25rem;
+  padding: 0 0.15rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.page-link:hover {
+  background: rgba(37, 99, 235, 0.16);
+}
+.dark .page-link {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+}
+.dark .page-link:hover {
+  background: rgba(96, 165, 250, 0.22);
+}
+
+.page-link-popover {
+  position: fixed;
+  z-index: 60;
+  width: 16rem;
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  border: 1px solid #e5e7eb;
+}
+.dark .page-link-popover {
+  background: #262626;
+  border-color: #404040;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.page-link-search {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  border-radius: 0.5rem 0.5rem 0 0;
+  background: transparent;
+  color: inherit;
+}
+.dark .page-link-search {
+  border-bottom-color: #404040;
+}
+.page-link-results {
+  max-height: 12rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+.page-link-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  border-radius: 0.375rem;
+  color: #374151;
+}
+.page-link-result:hover {
+  background: #f3f4f6;
+}
+.dark .page-link-result {
+  color: #e5e5e5;
+}
+.dark .page-link-result:hover {
+  background: #333333;
+}
+.page-link-empty {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  color: #9ca3af;
+}

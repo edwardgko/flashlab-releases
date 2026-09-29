@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nunca le pongas inset al <background>: la guía de Android exige que
+     cubra el lienzo completo del ícono adaptativo, sin margen. `capacitor-
+     assets generate` lo genera CON 16.7% de inset en el fondo por defecto
+     (mismo valor que el foreground) — eso deja un anillo transparente
+     alrededor, que muchos launchers pintan negro (reportado como "fondo
+     negro"). Si se vuelve a correr ese comando, hay que sacarle el inset al
+     fondo a mano de nuevo. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground>
+        <inset android:drawable="@mipmap/ic_launcher_foreground" android:inset="16.7%" />
+    </foreground>
+</adaptive-icon>

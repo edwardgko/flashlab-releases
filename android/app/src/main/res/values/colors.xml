@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- fondo del splash centrado (drawable/splash_centered.xml) — override
+         oscuro en values-night/colors.xml, mismo #111111 que ya usaba el
+         splash.png viejo para modo noche. -->
+    <color name="splashBackground">#FFFFFF</color>
+</resources>

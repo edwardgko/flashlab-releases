@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "636742525707",
+    "project_id": "flashlab-1a436",
+    "storage_bucket": "flashlab-1a436.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:636742525707:android:245d8635b1a1892820780e",
+        "android_client_info": {
+          "package_name": "com.flashlab.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBHxfy3EFUx7hrcG7Gth9rV2mGaTro1GtY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
