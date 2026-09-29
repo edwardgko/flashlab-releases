@@ -48,7 +48,6 @@ function Icon({ d, className = 'h-3.5 w-3.5', viewBox = '0 0 24 24' }) {
 }
 
 const ICONS = {
-  pin: ['M12 17v5', 'M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z'],
   home: ['M4 11.5 12 4l8 7.5', 'M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9'],
   trash: ['M4 7h16', 'M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2', 'M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12', 'M10 11v6M14 11v6'],
   chevronsLeft: ['M11 17l-5-5 5-5', 'M18 17l-5-5 5-5'],
@@ -405,8 +404,6 @@ export default function Sidebar({
   onCycleTheme,
   mobile = false,
   open = true,
-  pinned = false,
-  onTogglePin,
 }) {
   // este componente se monta con sidebarOpen (ver App.jsx: `{sidebarMounted
   // && <Sidebar/>}`) — sin el truco de "entered" aparecía de un salto en vez
@@ -773,26 +770,27 @@ export default function Sidebar({
       // el ancho ajustable (`width`, con su drag-to-resize) solo aplica en
       // desktop — un style inline le gana a la clase w-full de mobile
       // (ver abajo) y le rompería el ancho completo si se pusiera siempre.
-      style={
-        mobile
-          ? undefined
-          : pinned
-          ? { width, marginLeft: isOpenVisual ? 0 : -width }
-          : { width }
-      }
+      style={mobile ? undefined : { width }}
       className={
         mobile
           ? // cajón superpuesto, no panel en el flujo — por eso fixed en vez
-            // de shrink-0/absolute. Ancho completo de la pantalla
+            // de shrink-0/absolute. Ancho completo de la pantalla (antes
+            // w-[85vw] max-w-xs dejaba una franja del contenido de atrás
+            // visible a la derecha, reportado como que "no se ajusta al
+            // ancho completo"). translate-x anima la entrada deslizando
+            // desde la izquierda (mismo mecanismo que el panel derecho de
+            // PagePeek, espejado).
             `fixed inset-0 z-30 flex w-full flex-col border-r border-gray-200 bg-gray-50 shadow-2xl transition-transform duration-200 ease-out dark:border-neutral-800 dark:bg-[#202020] ${
               isOpenVisual ? 'translate-x-0' : '-translate-x-full'
             }`
-          : pinned
-          ? // modo fijo (pinned): panel acoplado en el flujo del layout que no
-            // se superpone sobre el contenido ni usa fondo oscuro
-            `relative z-20 flex shrink-0 flex-col border-r border-gray-200 bg-gray-50 transition-[margin-left] duration-200 ease-out dark:border-neutral-800 dark:bg-[#202020]`
-          : // modo flotante (unpinned): se superpone sobre el contenido con
-            // fondo oscuro (SidebarBackdrop) y sombra
+          : // antes era un panel DOCKED (relative shrink-0): al abrirse
+            // empujaba <main>, que se achicaba. Ahora se superpone (absolute,
+            // recortado al área de contenido por el div `relative` en
+            // App.jsx — no tapa la barra de pestañas de arriba, esa no es
+            // "contenido"), con el mismo fondo oscuro detrás que ya usa
+            // mobile (SidebarBackdrop, ver App.jsx) y el mismo deslizamiento
+            // — <main> ya no necesita reaccionar a sidebarOpen para el
+            // ancho: al no estar en el flujo, siempre queda a ancho completo.
             `absolute inset-y-0 left-0 z-30 flex flex-col border-r border-gray-200 bg-gray-50 shadow-2xl transition-transform duration-200 ease-out dark:border-neutral-800 dark:bg-[#202020] ${
               isOpenVisual ? 'translate-x-0' : '-translate-x-full'
             }`
@@ -832,35 +830,14 @@ export default function Sidebar({
             </button>
           )}
         </span>
-        <div className="flex items-center gap-1">
-          {!mobile && (
-            <button
-              type="button"
-              aria-label={pinned ? 'Desanclar barra lateral' : 'Fijar barra lateral'}
-              title={pinned ? 'Desanclar barra lateral (modo flotante)' : 'Fijar barra lateral (dejar fija)'}
-              onClick={onTogglePin}
-              className={`cursor-pointer rounded-md p-1.5 transition-colors ${
-                pinned
-                  ? 'bg-blue-50 text-blue-600 shadow-xs hover:bg-blue-100 hover:text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 dark:hover:bg-blue-900/80 dark:hover:text-blue-300'
-                  : 'text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
-              }`}
-            >
-              <Icon
-                d={ICONS.pin}
-                className={`h-4 w-4 transition-transform duration-150 ${pinned ? 'rotate-0' : '-rotate-45'}`}
-              />
-            </button>
-          )}
-          <button
-            type="button"
-            aria-label="Ocultar sidebar"
-            title="Ocultar sidebar"
-            onClick={onCollapse}
-            className="cursor-pointer rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-          >
-            <Icon d={mobile ? ICONS.x : ICONS.chevronsLeft} className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label="Ocultar sidebar"
+          onClick={onCollapse}
+          className="rounded-md p-1.5 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+        >
+          <Icon d={ICONS.x} className="h-4 w-4" />
+        </button>
       </div>
       <div className="px-2">
         <button
