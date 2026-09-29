@@ -4,7 +4,7 @@
   "description": "Clon local de Notion: Electron + React + Editor.js, todo en tu disco.",
   "author": "flashlab",
   "private": true,
-  "version": "0.1.70",
+  "version": "0.1.72",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "dev:renderer": "vite",
     "build": "vite build",
     "dist": "vite build && electron-builder",
-    "release": "vite build && electron-builder --publish always",
+    "release": "node scripts/release.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },
