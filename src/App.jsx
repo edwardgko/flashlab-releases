@@ -155,6 +155,23 @@ export default function App({ theme, setTheme }) {
   // al 125% esa copia decía "es mobile" en una PC y el sidebar arrancaba
   // cerrado, en modo cajón a pantalla completa.
   const [sidebarOpen, setSidebarOpen] = useState(() => !isMobileNow())
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
+    try {
+      const saved = localStorage.getItem("flashlab:sidebar_pinned")
+      return saved !== null ? saved === "true" : true
+    } catch {
+      return true
+    }
+  })
+  const toggleSidebarPin = useCallback(() => {
+    setSidebarPinned((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem("flashlab:sidebar_pinned", String(next))
+      } catch {}
+      return next
+    })
+  }, [])
   // en desktop, sidebarMounted se queda en true 200ms después de que
   // sidebarOpen pasa a false (mismo duration-200 que el transition-transform
   // de Sidebar.jsx) para que el cajón y su fondo alcancen a deslizar/apagarse
@@ -662,7 +679,7 @@ export default function App({ theme, setTheme }) {
         vez de superponerse). Ahora se superpone en las dos plataformas, así
         que el backdrop también corre en las dos; `confined` en desktop lo
         recorta al área de contenido (no tapa la barra de pestañas). */}
-        {sidebarMounted && <SidebarBackdrop onClick={() => setSidebarOpen(false)} confined={!isMobile} open={sidebarOpen} />}
+        {sidebarMounted && (isMobile || !sidebarPinned) && <SidebarBackdrop onClick={() => setSidebarOpen(false)} confined={!isMobile} open={sidebarOpen} />}
         {sidebarMounted && (
           <Sidebar
             mobile={isMobile}

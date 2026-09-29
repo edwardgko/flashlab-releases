@@ -1,5 +1,9 @@
 # Reglas del proyecto
 
+## Lectura obligatoria al iniciar un nuevo chat
+
+Al iniciar cualquier nueva sesión o chat sobre este proyecto, consultar y leer ARQUITECTURA.md para comprender de inmediato la lógica del sistema, stack, flujos de datos, módulos y componentes sin necesidad de reanalizar el código desde cero.
+
 ## Mobile first
 
 Pensar siempre en mobile first en todo lo que se haga en este proyecto (UI, layout, interacciones). Diseñar y maquetar primero para pantallas chicas, y expandir hacia desktop después (`sm:`/`md:`/`lg:` en Tailwind como mejora progresiva, no como base). Esto aplica a toda funcionalidad nueva y a cualquier ajuste visual, no solo a pantallas pensadas explícitamente para mobile.

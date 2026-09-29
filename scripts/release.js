@@ -29,6 +29,32 @@ if (token) {
   process.env.GITHUB_TOKEN = token;
 }
 
+function ghRequest(options, data = null) {
+  return new Promise((resolve) => {
+    const req = https.request({
+      ...options,
+      headers: {
+        'User-Agent': 'flashlab-auto-release',
+        'Authorization': 'Bearer ' + token,
+        ...(options.headers || {})
+      }
+    }, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => {
+        try {
+          resolve({ statusCode: res.statusCode, body: JSON.parse(d) });
+        } catch {
+          resolve({ statusCode: res.statusCode, body: d });
+        }
+      });
+    });
+    req.on('error', () => resolve({ statusCode: 500, body: null }));
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
 // 1. Sincronizar tag en Git
 console.log(`📌 Sincronizando tag ${tag} en GitHub...`);
 try {
@@ -43,11 +69,40 @@ try {
   console.log(`(Aviso en sincronización git: ${e.message})`);
 }
 
-// 2. Compilar con Vite
+// 2. Pre-crear el release en GitHub para evitar race condition de electron-builder
+let releaseId = null;
+if (token) {
+  const checkRel = await ghRequest({
+    hostname: 'api.github.com',
+    path: `/repos/${repo}/releases/tags/${tag}`,
+    method: 'GET'
+  });
+  if (checkRel.body && checkRel.body.id) {
+    releaseId = checkRel.body.id;
+    console.log(`✓ Release ${tag} ya existente en GitHub (id: ${releaseId}).`);
+  } else {
+    console.log(`📦 Creando release ${tag} en GitHub...`);
+    const createRel = await ghRequest({
+      hostname: 'api.github.com',
+      path: `/repos/${repo}/releases`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({
+      tag_name: tag,
+      name: tag,
+      draft: false,
+      prerelease: false
+    }));
+    releaseId = createRel.body?.id;
+    if (releaseId) console.log(`✓ Release ${tag} creado en GitHub (id: ${releaseId}).`);
+  }
+}
+
+// 3. Compilar con Vite
 console.log('\n🔨 Compilando Vite...');
 execSync('vite build', { stdio: 'inherit' });
 
-// 3. Empaquetar con electron-builder
+// 4. Empaquetar con electron-builder
 console.log('\n📦 Empaquetando con electron-builder...');
 try {
   execSync('electron-builder --publish always', {
@@ -58,37 +113,11 @@ try {
   console.log('(electron-builder completado, asegurando artefactos en GitHub...)');
 }
 
-// 4. Verificación y subida automática garantizada
-async function ensureAssets() {
+// 5. Verificación y subida automática garantizada de assets de Windows
+async function ensureDesktopAssets() {
   if (!token) {
     console.log('⚠️ No se encontró token en variables ni en .env');
     return;
-  }
-
-  function ghRequest(options, data = null) {
-    return new Promise((resolve) => {
-      const req = https.request({
-        ...options,
-        headers: {
-          'User-Agent': 'flashlab-auto-release',
-          'Authorization': 'Bearer ' + token,
-          ...(options.headers || {})
-        }
-      }, (res) => {
-        let d = '';
-        res.on('data', c => d += c);
-        res.on('end', () => {
-          try {
-            resolve({ statusCode: res.statusCode, body: JSON.parse(d) });
-          } catch {
-            resolve({ statusCode: res.statusCode, body: d });
-          }
-        });
-      });
-      req.on('error', () => resolve({ statusCode: 500, body: null }));
-      if (data) req.write(data);
-      req.end();
-    });
   }
 
   const res = await ghRequest({
@@ -102,7 +131,7 @@ async function ensureAssets() {
     return;
   }
 
-  const releaseId = res.body.id;
+  releaseId = res.body.id;
   const assets = res.body.assets || [];
   const buildDir = 'C:/flashlab-build/release';
 
@@ -195,8 +224,71 @@ releaseDate: '${new Date().toISOString()}'
     }, bBuf);
     console.log(`✓ ${blockmapName} subido.`);
   }
-
-  console.log(`\n✨ ¡Release ${tag} 100% completo en GitHub! Ya puedes actualizar desde FlashLab.\n`);
 }
 
-await ensureAssets();
+// 6. Buildear y subir el .apk de Android (regla de oro de CLAUDE.md)
+async function buildAndUploadAndroidApk() {
+  if (!releaseId) {
+    console.log('⚠️ No hay releaseId para subir el APK');
+    return;
+  }
+  console.log(`\n🤖 Compilando APK de Android para ${tag}...`);
+  try {
+    console.log('📱 Sincronizando Capacitor con Android...');
+    execSync('npx cap sync android', { stdio: 'inherit' });
+
+    console.log('🔨 Compilando APK con Gradle (assembleRelease)...');
+    const javaHome = 'C:\\Users\\edwar\\dev-tools\\jdk21-home';
+    execSync('cmd.exe /c "gradlew.bat assembleRelease"', {
+      cwd: path.resolve('android'),
+      stdio: 'inherit',
+      env: { ...process.env, JAVA_HOME: javaHome }
+    });
+
+    const apkPath = path.resolve('android/app/build/outputs/apk/release/app-release.apk');
+    if (!fs.existsSync(apkPath)) {
+      console.log('⚠️ No se encontró app-release.apk en ' + apkPath);
+      return;
+    }
+
+    const apkName = `FlashLab-${version}.apk`;
+    const apkBuf = fs.readFileSync(apkPath);
+    const apkSize = apkBuf.length;
+
+    // Verificar si ya existe en GitHub
+    const freshRel = await ghRequest({
+      hostname: 'api.github.com',
+      path: `/repos/${repo}/releases/${releaseId}`,
+      method: 'GET'
+    });
+    const freshAssets = freshRel.body?.assets || [];
+    const oldApk = freshAssets.find(a => a.name === apkName);
+    if (oldApk) {
+      console.log(`🔄 Reemplazando ${apkName} previo en GitHub...`);
+      await ghRequest({
+        hostname: 'api.github.com',
+        path: `/repos/${repo}/releases/assets/${oldApk.id}`,
+        method: 'DELETE'
+      });
+    }
+
+    console.log(`⬆ Subiendo ${apkName} (${(apkSize / 1024 / 1024).toFixed(1)} MB)...`);
+    await ghRequest({
+      hostname: 'uploads.github.com',
+      path: `/repos/${repo}/releases/${releaseId}/assets?name=${encodeURIComponent(apkName)}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'Content-Length': apkSize
+      }
+    }, apkBuf);
+    console.log(`✓ ${apkName} subido exitosamente a GitHub.`);
+  } catch (err) {
+    console.error('⚠️ Error al generar o subir el APK de Android:', err.message);
+  }
+}
+
+await ensureDesktopAssets();
+await buildAndUploadAndroidApk();
+
+console.log(`\n✨ ¡Release ${tag} 100% completo en GitHub! Contiene .exe y .apk sincronizados.\n`);
