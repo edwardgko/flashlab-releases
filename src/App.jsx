@@ -492,7 +492,7 @@ export default function App({ theme, setTheme }) {
 
   const restorePage = async (id) => {
     await api.restorePage(id)
-    patchActiveTab({ kind: 'page' })
+    patchActiveTab({ kind: 'page', pageId: id })
     await syncFromBackend(id)
   }
 

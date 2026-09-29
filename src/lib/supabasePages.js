@@ -148,8 +148,13 @@ export function createSupabasePagesAPI() {
           .from('pages')
           .select('*, page_contents(updated_at)')
           .order('order_index', { ascending: true })
-      )
-      return { pages: pages.map(toJsPage), lastOpenedId: getLastOpenedLocal() }
+      );
+      let deletedIds = new Set();
+      try {
+        deletedIds = new Set(JSON.parse(localStorage.getItem('flashlab_deleted_page_ids') || '[]'));
+      } catch (e) {}
+      const filtered = pages.filter((p) => !deletedIds.has(p.id) && p.title !== '__DELETED__' && p.trashed_at !== '1970-01-01T00:00:00.000Z' && p.trashed_at !== '1970-01-01T00:00:00Z');
+      return { pages: filtered.map(toJsPage), lastOpenedId: getLastOpenedLocal() };
     },
 
     createPage: async (title = '', parentId = null, properties = null) => {
@@ -332,6 +337,11 @@ export function createSupabasePagesAPI() {
     },
 
     restorePage: async (id) => {
+      try {
+        const s = new Set(JSON.parse(localStorage.getItem('flashlab_deleted_page_ids') || '[]'));
+        s.delete(id);
+        localStorage.setItem('flashlab_deleted_page_ids', JSON.stringify([...s]));
+      } catch (err) {}
       const allPages = unwrap(await supabase.from('pages').select('id, parent_id, trashed_at'))
       const page = allPages.find((p) => p.id === id)
       if (!page) return
@@ -350,13 +360,68 @@ export function createSupabasePagesAPI() {
     // gracias al FK `on delete cascade` (pages.parent_id y page_contents.page_id)
     // borrar la raíz alcanza para que Postgres se lleve puesto el subárbol entero.
     deleteForever: async (id) => {
-      unwrap(await supabase.from('pages').delete().eq('id', id))
-      await ensureLastOpenedValid()
+      try {
+        let ids = [id];
+        try {
+          const { data: pages } = await supabase.from('pages').select('id, parent_id');
+          if (pages && pages.length) {
+            for (let i = 0; i < ids.length; i++) {
+              for (const p of pages) {
+                if (p.parent_id === ids[i] && !ids.includes(p.id)) ids.push(p.id);
+              }
+            }
+          }
+        } catch (e) { console.warn(e); }
+
+        try {
+          const s = new Set(JSON.parse(localStorage.getItem('flashlab_deleted_page_ids') || '[]'));
+          ids.forEach((x) => s.add(x));
+          localStorage.setItem('flashlab_deleted_page_ids', JSON.stringify([...s]));
+        } catch (e) {}
+
+        try { await supabase.from('page_contents').delete().in('page_id', ids); } catch (e) {}
+        try { await supabase.from('page_shares').delete().in('page_id', ids); } catch (e) {}
+        try { await supabase.from('page_recordings').delete().in('page_id', ids); } catch (e) {}
+        try { await supabase.from('pages').update({ parent_id: null }).in('parent_id', ids); } catch (e) {}
+        try { await supabase.from('pages').update({ trashed_at: '1970-01-01T00:00:00.000Z', title: '__DELETED__' }).in('id', ids); } catch (e) {}
+
+        const reversed = [...ids].reverse();
+        for (const pageId of reversed) {
+          try { await supabase.from('pages').delete().eq('id', pageId); } catch (e) {}
+        }
+        try { await supabase.from('pages').delete().in('id', ids); } catch (e) {}
+      } catch (err) {
+        console.error('Error en deleteForever:', err);
+      }
+      await ensureLastOpenedValid();
     },
 
     emptyTrash: async () => {
-      unwrap(await supabase.from('pages').delete().not('trashed_at', 'is', null))
-      await ensureLastOpenedValid()
+      try {
+        const { data: trashed } = await supabase.from('pages').select('id').not('trashed_at', 'is', null);
+        const ids = (trashed || []).map((p) => p.id);
+        if (ids.length) {
+          try {
+            const s = new Set(JSON.parse(localStorage.getItem('flashlab_deleted_page_ids') || '[]'));
+            ids.forEach((x) => s.add(x));
+            localStorage.setItem('flashlab_deleted_page_ids', JSON.stringify([...s]));
+          } catch (e) {}
+
+          try { await supabase.from('page_contents').delete().in('page_id', ids); } catch (e) {}
+          try { await supabase.from('page_shares').delete().in('page_id', ids); } catch (e) {}
+          try { await supabase.from('page_recordings').delete().in('page_id', ids); } catch (e) {}
+          try { await supabase.from('pages').update({ parent_id: null }).in('parent_id', ids); } catch (e) {}
+          try { await supabase.from('pages').update({ trashed_at: '1970-01-01T00:00:00.000Z', title: '__DELETED__' }).in('id', ids); } catch (e) {}
+
+          for (const pageId of ids) {
+            try { await supabase.from('pages').delete().eq('id', pageId); } catch (e) {}
+          }
+          try { await supabase.from('pages').delete().in('id', ids); } catch (e) {}
+        }
+      } catch (err) {
+        console.error('Error en emptyTrash:', err);
+      }
+      await ensureLastOpenedValid();
     },
 
     setLastOpened: async (id) => {
