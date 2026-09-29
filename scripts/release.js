@@ -122,8 +122,8 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
     console.error(`Archivo no encontrado: ${filePath}`);
     return;
   }
-  const fileBuf = fs.readFileSync(filePath);
-  const fileSize = fileBuf.length;
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
 
   const rel = await ghRequest({
     hostname: 'api.github.com',
@@ -134,6 +134,10 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
   const existing = assets.find(a => a.name === assetName);
 
   if (existing) {
+    if (existing.size === fileSize) {
+      console.log(`✓ ${assetName} ya está subido en GitHub con el tamaño correcto (${(fileSize / 1024 / 1024).toFixed(2)} MB).`);
+      return;
+    }
     console.log(`🔄 Reemplazando ${assetName} existente en GitHub...`);
     await ghRequest({
       hostname: 'api.github.com',
@@ -143,21 +147,37 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
   }
 
   console.log(`⬆ Subiendo ${assetName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)...`);
-  const uploadRes = await ghRequest({
-    hostname: 'uploads.github.com',
-    path: `/repos/${repo}/releases/${relId}/assets?name=${encodeURIComponent(assetName)}`,
-    method: 'POST',
-    headers: {
-      'Content-Type': contentType,
-      'Content-Length': fileSize
-    }
-  }, fileBuf);
-
-  if (uploadRes.statusCode >= 200 && uploadRes.statusCode < 300) {
-    console.log(`✓ ${assetName} subido.`);
-  } else {
-    console.error(`Error subiendo ${assetName}:`, uploadRes.statusCode, uploadRes.body);
-  }
+  await new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'uploads.github.com',
+      path: `/repos/${repo}/releases/${relId}/assets?name=${encodeURIComponent(assetName)}`,
+      method: 'POST',
+      headers: {
+        'User-Agent': 'flashlab-auto-release',
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': contentType,
+        'Content-Length': fileSize
+      }
+    }, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          console.log(`✓ ${assetName} subido.`);
+          resolve();
+        } else {
+          console.error(`Error subiendo ${assetName}:`, res.statusCode, d);
+          resolve();
+        }
+      });
+    });
+    req.on('error', (err) => {
+      console.error(`Error de red subiendo ${assetName}:`, err.message);
+      resolve();
+    });
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(req);
+  });
 }
 
 // 5. Verificación y subida automática garantizada de assets
@@ -210,7 +230,7 @@ async function ensureAllAssets() {
 
     console.log('🔨 Compilando APK con Gradle (assembleRelease)...');
     const javaHome = 'C:\\Users\\edwar\\dev-tools\\jdk21-home';
-    execSync('cmd.exe /c "call gradlew.bat assembleRelease"', {
+    execSync('cmd.exe /c ".\\gradlew.bat assembleRelease"', {
       cwd: path.resolve('android'),
       stdio: 'inherit',
       env: { ...process.env, JAVA_HOME: javaHome }
