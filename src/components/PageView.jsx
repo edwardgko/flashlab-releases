@@ -15,6 +15,9 @@ import {
   subscribe as subscribeRecording,
 } from '../lib/screenRecording.js'
 import { getDriveUploadsVersion, subscribeDriveUploads, withLiveDriveState } from '../lib/driveUploadTracker.js'
+import { usePagePresence } from '../lib/pagePresence.js'
+import CollaboratorCursors from './CollaboratorCursors.jsx'
+import CollaboratorsBar from './CollaboratorsBar.jsx'
 
 // modales que solo se montan bajo demanda (Compartir / Editar grabación) —
 // no tiene sentido pagarlos en el bundle inicial si nunca se abren en la sesión.
@@ -580,6 +583,14 @@ export default function PageView({
   const [shareOpen, setShareOpen] = useState(false)
   const [editingRecordingId, setEditingRecordingId] = useState(null)
   const session = useAuthSession()
+  const scrollContainerRef = useRef(null)
+  const {
+    collaborators,
+    remoteCursors,
+    handleMouseMove,
+    handleMouseLeave,
+    broadcastElementFocus,
+  } = usePagePresence(page.id, session, scrollContainerRef)
   const isOwner = !isDesktop || !page.ownerId || page.ownerId === session?.user?.id
   const [remoteChange, setRemoteChange] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
@@ -615,16 +626,8 @@ export default function PageView({
   }, [])
 
   // Sincronización con otras personas en la MISMA página compartida.
-  // Antes esto solo levantaba un cartel ("Alguien actualizó esta página") y
-  // esperaba un clic. Ahora, si no estás editando, se aplica solo — como en
-  // un documento de Drive. El cartel queda para el único caso donde
-  // recargar sería destructivo: que estés escribiendo justo en ese momento.
-  // Cuando dejás de escribir se aplica igual, sin que tengas que clickear.
-  //
-  // Sigue siendo solo para páginas COMPARTIDAS: si el único con acceso sos
-  // vos, un UPDATE remoto solo puede ser tuyo desde otro dispositivo, y
-  // recargar la vista por eso confunde más de lo que ayuda (reportado:
-  // aparecía en páginas sin compartir con nadie).
+  // En desktop se aplica in-place (editor.render) sin remontar ni destruir
+  // el DOM del editor, evitando cualquier parpadeo de pantalla.
   useEffect(() => {
     if (page.isDatabase) return undefined
     setRemoteChange(false)
@@ -633,6 +636,7 @@ export default function PageView({
     let unsubscribe = null
     let retryTimer = null
     let debounceTimer = null
+    let latestRemoteContent = null
     // cortacircuitos: cuántas recargas automáticas seguidas se hicieron sin
     // que el usuario tocara nada. Ver applyRemote.
     let burstCount = 0
@@ -649,30 +653,35 @@ export default function PageView({
         retryTimer = setTimeout(applyRemote, REMOTE_RELOAD_RETRY_MS)
         return
       }
-      // Aunque la comparación de arriba sea correcta, recargar en cada
-      // guardado ajeno haría parpadear la página mientras la otra persona
-      // escribe (su autoguardado dispara cada 800ms). Se corta la racha en
-      // una sola recarga, cuando dejó de escribir.
+
       burstCount += 1
       clearTimeout(burstTimer)
       burstTimer = setTimeout(() => {
         burstCount = 0
       }, REMOTE_BURST_WINDOW_MS)
       if (burstCount > REMOTE_MAX_BURST) {
-        // Llegar acá significa que algo nos está diciendo "cambió" en loop —
-        // exactamente el bug de jsonb que hizo parpadear las páginas
-        // compartidas. Ante la duda: dejar de recargar sola y volver al
-        // cartel manual. Molesto, pero jamás una pantalla estroboscópica.
         console.warn('[liveSync] demasiadas recargas seguidas, se vuelve al aviso manual')
         setRemoteChange(true)
         return
       }
+
+      // En desktop, aplicar el contenido remoto in-place en Editor.js mediante CustomEvent
+      // sin desmontar el componente ni destruir el DOM, eliminando por completo el parpadeo blanco
+      if (!isMobile && latestRemoteContent) {
+        window.dispatchEvent(
+          new CustomEvent(`flashlab:remote-page-content-${page.id}`, { detail: latestRemoteContent })
+        )
+        setRemoteChange(false)
+        return
+      }
+
       handleReloadRemote()
     }
 
     api.listShares(page.id).then((shares) => {
       if (cancelled || shares.length === 0) return
       unsubscribe = subscribeToPageContent(page.id, (content) => {
+        latestRemoteContent = content
         const incoming = stableStringify(content ?? null)
         // lastContentRef todavía en null = el editor ni terminó de cargar;
         // e igual al último sincronizado = es el eco de tu propio guardado.
@@ -688,7 +697,7 @@ export default function PageView({
       clearTimeout(burstTimer)
       unsubscribe?.()
     }
-  }, [page.id, page.isDatabase, handleReloadRemote, isEditingNow])
+  }, [page.id, page.isDatabase, handleReloadRemote, isEditingNow, isMobile])
 
   // "Recargar" del sidebar: mismo remontaje, pero pedido a mano — acá no hace
   // falta preguntar si está compartida (lo pidió el usuario explícitamente).
@@ -998,6 +1007,7 @@ export default function PageView({
           <span className="max-w-40 truncate text-gray-500 dark:text-neutral-400">{title || 'Sin título'}</span>
         </nav>
         <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+          <CollaboratorsBar collaborators={collaborators} />
           {isOwner && (
             <button
               type="button"
@@ -1106,7 +1116,14 @@ export default function PageView({
           </span>
         </div>
       </div>
-      <div data-page-scroll className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        data-page-scroll
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+      >
+        <CollaboratorCursors cursors={remoteCursors} />
         {recordingState === 'saving' && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/70 backdrop-blur-[1px] dark:bg-neutral-900/70">
             <Spinner className="h-6 w-6 text-gray-500 dark:text-neutral-400" />
@@ -1202,6 +1219,8 @@ export default function PageView({
                 onMoveRow={onMoveRow}
                 onTrashRows={onTrashRows}
                 onUpdateSchema={onUpdateSchema}
+                remoteCursors={remoteCursors}
+                broadcastElementFocus={broadcastElementFocus}
               />
             ) : (
               <>
@@ -1247,6 +1266,8 @@ export default function PageView({
                       onStatusChange={setStatus}
                       onNavigatePage={handleNavigatePage}
                       onContentSynced={handleContentSynced}
+                      remoteCursors={remoteCursors}
+                      broadcastElementFocus={broadcastElementFocus}
                     />
                   )}
                 </div>

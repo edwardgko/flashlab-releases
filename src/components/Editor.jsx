@@ -133,7 +133,14 @@ async function searchPagesExcluding(query, excludeId) {
   return list.filter((p) => p.id !== excludeId)
 }
 
-export default function Editor({ pageId, onStatusChange, onNavigatePage, onContentSynced }) {
+export default function Editor({
+  pageId,
+  onStatusChange,
+  onNavigatePage,
+  onContentSynced,
+  remoteCursors,
+  broadcastElementFocus,
+}) {
   const holderRef = useRef(null)
   const editorRef = useRef(null)
   const saveTimerRef = useRef(null)
@@ -267,12 +274,11 @@ export default function Editor({ pageId, onStatusChange, onNavigatePage, onConte
       if (editorRef.current === editor) editorRef.current = null
       if (editor) {
         const currentEditor = editor
-        // Guardar SIEMPRE al desmontar (cambio de página): el onChange de
-        // Editor.js tiene su propio debounce interno (~500 ms), así que
-        // pendingRef puede estar aún en false con cambios reales en el DOM.
-        // Solo se omite si la carga inicial falló, para no sobrescribir
-        // datos buenos con un editor vacío.
-        const mustFlush = loadOk || pendingRef.current
+        // Solo guardar al desmontar si realmente quedaron cambios pendientes
+        // sin guardar. Antes loadOk obligaba a guardar siempre, disparando
+        // guardados de contenido viejo al desmontar que hacían parpadear y
+        // pisaban las ediciones de otros usuarios en tiempo real.
+        const mustFlush = Boolean(pendingRef.current)
         // destroy() antes de isReady lanza excepción
         currentEditor.isReady
           .then(async () => {
@@ -293,6 +299,117 @@ export default function Editor({ pageId, onStatusChange, onNavigatePage, onConte
       }
     }
   }, [pageId, scheduleSave, onStatusChange, onNavigatePage, onContentSynced])
+
+  // Sincronización in-place cuando otra persona edita la misma página:
+  // usa editor.render() sin desmontar ni destruir el DOM del editor, evitando
+  // parpadeos y preservando el scroll y el estado.
+  useEffect(() => {
+    const onRemoteContent = async (event) => {
+      const incoming = event.detail
+      const editor = editorRef.current
+      if (!editor || !incoming?.blocks) return
+
+      // Si el usuario local está escribiendo en este momento, no pisarle el texto
+      if (pendingRef.current) return
+
+      try {
+        await editor.isReady
+        await editor.render({ blocks: incoming.blocks })
+        onContentSynced?.(incoming)
+      } catch (err) {
+        console.warn('Error al aplicar contenido remoto en Editor.js:', err)
+      }
+    }
+
+    window.addEventListener(`flashlab:remote-page-content-${pageId}`, onRemoteContent)
+    return () => {
+      window.removeEventListener(`flashlab:remote-page-content-${pageId}`, onRemoteContent)
+    }
+  }, [pageId, onContentSynced])
+
+  // Notificar a los demás colaboradores qué bloque / línea estamos editando
+  useEffect(() => {
+    const holder = holderRef.current
+    if (!holder || !broadcastElementFocus) return
+
+    const updateFocusedBlock = () => {
+      const activeEl = document.activeElement
+      if (!activeEl || !holder.contains(activeEl)) return
+
+      const blockEl = activeEl.closest('.ce-block')
+      if (!blockEl) return
+
+      const blockId = blockEl.dataset?.id || null
+      const allBlocks = Array.from(holder.querySelectorAll('.ce-block'))
+      const blockIndex = allBlocks.indexOf(blockEl)
+
+      if (blockIndex >= 0) {
+        broadcastElementFocus({ blockIndex, blockId })
+      }
+    }
+
+    const handleBlur = (e) => {
+      if (!holder.contains(e.relatedTarget)) {
+        broadcastElementFocus({ blockIndex: null, blockId: null })
+      }
+    }
+
+    holder.addEventListener('focusin', updateFocusedBlock)
+    holder.addEventListener('click', updateFocusedBlock)
+    holder.addEventListener('keyup', updateFocusedBlock)
+    holder.addEventListener('focusout', handleBlur)
+
+    return () => {
+      holder.removeEventListener('focusin', updateFocusedBlock)
+      holder.removeEventListener('click', updateFocusedBlock)
+      holder.removeEventListener('keyup', updateFocusedBlock)
+      holder.removeEventListener('focusout', handleBlur)
+    }
+  }, [broadcastElementFocus])
+
+  // Mostrar visualmente en qué bloque / línea está ubicado cada colaborador
+  // (barra lateral izquierda en el bloque + badge con su nombre, estilo Google Docs / Word)
+  useEffect(() => {
+    const holder = holderRef.current
+    if (!holder) return
+
+    // Limpiar marcas previas
+    holder.querySelectorAll('.collab-block-badge').forEach((el) => el.remove())
+    holder.querySelectorAll('.collab-block-active').forEach((el) => {
+      el.classList.remove('collab-block-active')
+      el.style.borderLeft = ''
+      el.style.paddingLeft = ''
+      el.style.borderRadius = ''
+      el.style.position = ''
+    })
+
+    const allBlocks = Array.from(holder.querySelectorAll('.ce-block'))
+    if (allBlocks.length === 0 || !remoteCursors) return
+
+    Object.values(remoteCursors).forEach((c) => {
+      if (!c || c.hidden) return
+      let targetBlock = null
+      if (c.activeBlockId) {
+        targetBlock = holder.querySelector(`.ce-block[data-id="${c.activeBlockId}"]`)
+      }
+      if (!targetBlock && c.activeBlockIndex != null && c.activeBlockIndex >= 0 && c.activeBlockIndex < allBlocks.length) {
+        targetBlock = allBlocks[c.activeBlockIndex]
+      }
+      if (targetBlock) {
+        targetBlock.classList.add('collab-block-active')
+        targetBlock.style.position = 'relative'
+        targetBlock.style.borderLeft = `3.5px solid ${c.color?.bg || '#2563eb'}`
+        targetBlock.style.paddingLeft = '6px'
+        targetBlock.style.transition = 'border-color 0.15s ease, padding 0.15s ease'
+
+        const badge = document.createElement('div')
+        badge.className = 'collab-block-badge pointer-events-none absolute -top-2.5 left-2 z-20 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-xs select-none'
+        badge.style.backgroundColor = c.color?.bg || '#2563eb'
+        badge.textContent = c.name
+        targetBlock.appendChild(badge)
+      }
+    })
+  }, [remoteCursors])
 
   // Vaciar el autosave pendiente cuando el proceso principal avisa del cierre
   useEffect(() => {

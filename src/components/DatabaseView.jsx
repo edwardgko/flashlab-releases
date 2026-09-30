@@ -545,12 +545,17 @@ const TITLE_SAVE_DELAY_MS = 500
 
 // título editable in-place: escribís directo en la tarjeta, sin abrir la página.
 // Un click en el ícono de expandir (esquina) abre la página completa aparte.
-function InlineTitle({ id, title, onUpdateTitle, className, style, placeholder = 'Sin título' }) {
+function InlineTitle({ id, title, onUpdateTitle, className, style, placeholder = 'Sin título', onFocus, onBlur }) {
   const [value, setValue] = useState(title)
   const ref = useRef(null)
   const timerRef = useRef(null)
 
-  useEffect(() => setValue(title), [title, id])
+  useEffect(() => {
+    // Si el usuario local está escribiendo en este textarea ahora mismo,
+    // no pisar lo que tipea con el valor que llega del sync remoto
+    if (ref.current && document.activeElement === ref.current) return
+    setValue(title)
+  }, [title, id])
 
   const autosize = (el) => {
     if (!el) return
@@ -569,6 +574,7 @@ function InlineTitle({ id, title, onUpdateTitle, className, style, placeholder =
       placeholder={placeholder}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
+      onFocus={() => onFocus?.(id)}
       onChange={(event) => {
         setValue(event.target.value)
         autosize(event.target)
@@ -578,6 +584,7 @@ function InlineTitle({ id, title, onUpdateTitle, className, style, placeholder =
       onBlur={() => {
         clearTimeout(timerRef.current)
         onUpdateTitle(id, value)
+        onBlur?.(id)
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) event.currentTarget.blur()
@@ -670,45 +677,58 @@ function BoardColumnHeader({ opt, color, count, onRename, onDelete }) {
 // blanco/negro-90% garantiza contraste sea cual sea el color de la etiqueta.
 // Eliminar sigue el mismo patrón "un clic arma, el segundo confirma" que el
 // resto de los botones de borrado de la app (OptionRow, BoardColumnHeader).
-function BoardCard({ row, color, onOpenRow, onUpdateTitle, onDuplicateRow, onDeleteRow, onDragStart, onDragEnd }) {
+function BoardCard({
+  row,
+  color,
+  onOpenRow,
+  onUpdateTitle,
+  onDuplicateRow,
+  onDeleteRow,
+  onDragStart,
+  onDragEnd,
+  remoteCollaborator,
+  onFocus,
+  onBlur,
+}) {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  // los 3 van en UNA sola burbuja (no cada uno con su propio círculo) al
-  // lado de la fecha, no montados arriba del título — así el fondo puede
-  // ser el mismo tinte suave que ya usa la tarjeta (tagBgStyle), en vez del
-  // color sólido a pleno que se necesitaba cuando estaban montados sobre el
-  // texto. Siempre visibles (ya no dependen de hover ni de mantener
-  // presionado — la posición fija al lado de la fecha ya no necesitaba
-  // ocultarlos para no competir con el título).
   const iconBubbleStyle = tagBgStyle(color, { bg: '38', bgDark: '4d' })
   const iconButtonClass = 'tag-text cursor-pointer rounded-full p-1 transition hover:brightness-125 dark:hover:brightness-150'
+
+  const cardStyle = tagBgStyle(color, { bg: '14', bgDark: '26', border: '30', borderDark: '4a' })
+  if (remoteCollaborator) {
+    cardStyle.outline = `2px solid ${remoteCollaborator.color?.bg || '#2563eb'}`
+    cardStyle.boxShadow = `0 0 10px ${remoteCollaborator.color?.ring || 'rgba(37,99,235,0.3)'}`
+  }
 
   return (
     <div
       data-row-id={row.id}
       draggable
+      onClick={() => onFocus?.(row.id)}
       onDragStart={(event) => {
         event.dataTransfer.setData('text/plain', row.id)
-        // acá el arrastre sale de la tarjeta entera, no de una manijita, así
-        // que la foto por defecto ya sería correcta — pero sale opaca y
-        // recortada por el contenedor de la columna. La miniatura propia se
-        // ve igual en las tres vistas.
         setDragPreview(event, event.currentTarget)
         onDragStart(row.id)
       }}
       onDragEnd={onDragEnd}
-      style={tagBgStyle(color, { bg: '14', bgDark: '26', border: '30', borderDark: '4a' })}
-      // el título ya no reserva margen para los botones (antes pr-6, luego
-      // mt-8, luego mt-5, incluso un intento de montarlos encima del
-      // texto): terminaron en su propia fila, al lado de la fecha, así el
-      // título siempre ocupa el ancho completo y ninguna de las dos filas
-      // le pisa espacio a la otra.
+      style={cardStyle}
       className="tag-bg tag-border relative cursor-pointer rounded-lg border p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
     >
+      {remoteCollaborator && (
+        <div
+          className="pointer-events-none absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-xs select-none"
+          style={{ backgroundColor: remoteCollaborator.color?.bg || '#2563eb' }}
+        >
+          <span>{remoteCollaborator.name}</span>
+        </div>
+      )}
       <InlineTitle
         id={row.id}
         title={row.title}
         onUpdateTitle={onUpdateTitle}
+        onFocus={() => onFocus?.(row.id)}
+        onBlur={() => onBlur?.(row.id)}
         style={tagTextStyle(color)}
         className="tag-text text-base font-medium leading-snug placeholder:font-normal placeholder:italic placeholder:text-gray-400 dark:placeholder:text-neutral-500"
       />
@@ -765,7 +785,20 @@ function BoardCard({ row, color, onOpenRow, onUpdateTitle, onDuplicateRow, onDel
   )
 }
 
-function BoardView({ rows, schema, groupProp, onOpenRow, onUpdateProperty, onUpdateTitle, onCreateRow, onDuplicateRow, onUpdateSchema, onTrashRows }) {
+function BoardView({
+  rows,
+  schema,
+  groupProp,
+  onOpenRow,
+  onUpdateProperty,
+  onUpdateTitle,
+  onCreateRow,
+  onDuplicateRow,
+  onUpdateSchema,
+  onTrashRows,
+  remoteCursors,
+  broadcastElementFocus,
+}) {
   const [dragId, setDragId] = useState(null)
   const [overOptionId, setOverOptionId] = useState(undefined)
   const containerRef = useRef(null)
@@ -861,19 +894,27 @@ function BoardView({ rows, schema, groupProp, onOpenRow, onUpdateProperty, onUpd
               onDelete={() => deleteOption(optionId)}
             />
             <div className="space-y-2">
-              {colRows.map((row) => (
-                <BoardCard
-                  key={row.id}
-                  row={row}
-                  color={color}
-                  onOpenRow={onOpenRow}
-                  onUpdateTitle={onUpdateTitle}
-                  onDuplicateRow={onDuplicateRow}
-                  onDeleteRow={(id) => onTrashRows?.([id])}
-                  onDragStart={setDragId}
-                  onDragEnd={() => setDragId(null)}
-                />
-              ))}
+              {colRows.map((row) => {
+                const remoteCollab = Object.values(remoteCursors || {}).find(
+                  (c) => !c?.hidden && c?.activeRowId === row.id
+                )
+                return (
+                  <BoardCard
+                    key={row.id}
+                    row={row}
+                    color={color}
+                    onOpenRow={onOpenRow}
+                    onUpdateTitle={onUpdateTitle}
+                    onDuplicateRow={onDuplicateRow}
+                    onDeleteRow={(id) => onTrashRows?.([id])}
+                    onDragStart={setDragId}
+                    onDragEnd={() => setDragId(null)}
+                    remoteCollaborator={remoteCollab}
+                    onFocus={(rowId) => broadcastElementFocus?.({ rowId })}
+                    onBlur={() => broadcastElementFocus?.({ rowId: null })}
+                  />
+                )
+              })}
             </div>
             <button
               type="button"
@@ -906,6 +947,9 @@ function TableRowView({
   onDragOverRow,
   onDragLeaveRow,
   onDropRow,
+  remoteCollaborator,
+  onFocus,
+  onBlur,
 }) {
   return (
     <tr
@@ -925,6 +969,13 @@ function TableRowView({
       } ${dropSide === 'after' ? 'border-b-2 border-b-blue-400' : ''}`}
     >
       <td className="relative p-0 align-top">
+        {remoteCollaborator && (
+          <span
+            className="absolute left-0 top-0 bottom-0 w-1 rounded-r shadow-xs z-10"
+            style={{ backgroundColor: remoteCollaborator.color?.bg || '#2563eb' }}
+            title={`Editado por ${remoteCollaborator.name}`}
+          />
+        )}
         <label className="absolute inset-0 flex cursor-pointer items-start justify-center pt-2">
           <input
             type="checkbox"
@@ -942,6 +993,8 @@ function TableRowView({
               id={row.id}
               title={row.title}
               onUpdateTitle={onUpdateTitle}
+              onFocus={() => onFocus?.(row.id)}
+              onBlur={() => onBlur?.(row.id)}
               className="text-sm font-medium text-gray-800 placeholder:font-normal placeholder:italic placeholder:text-gray-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
             />
           </td>
@@ -1375,6 +1428,8 @@ function TableView({
   onEditProperty,
   onInsertSelect,
   reorderable,
+  remoteCursors,
+  broadcastElementFocus,
 }) {
   const [menu, setMenu] = useState(null) // { propId, rect } | null
   const [dragPropId, setDragPropId] = useState(null)
@@ -1684,38 +1739,46 @@ function TableView({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <TableRowView
-              key={row.id}
-              row={row}
-              schema={visibleSchema}
-              selected={selected.has(row.id)}
-              onToggleSelect={() => toggleRowSelected(row.id)}
-              onOpenRow={onOpenRow}
-              onUpdateTitle={onUpdateTitle}
-              onUpdateProperty={onUpdateProperty}
-              onDuplicateRow={onDuplicateRow}
-              onUpdatePropOptions={updatePropOptions}
-              reorderable={reorderable}
-              dropSide={dragRowId && rowDropHint?.rowId === row.id ? rowDropHint.side : null}
-              onDragStart={() => setDragRowId(row.id)}
-              onDragEndRow={() => {
-                setDragRowId(null)
-                setRowDropHint(null)
-              }}
-              onDragOverRow={(event) => {
-                if (!dragRowId || dragRowId === row.id) return
-                event.preventDefault()
-                const rect = event.currentTarget.getBoundingClientRect()
-                const side = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
-                setRowDropHint({ rowId: row.id, side })
-              }}
-              onDragLeaveRow={(event) => {
-                if (event.currentTarget === event.target) setRowDropHint(null)
-              }}
-              onDropRow={() => handleRowDrop(row.id, rowDropHint?.side ?? 'before')}
-            />
-          ))}
+          {rows.map((row) => {
+            const remoteCollab = Object.values(remoteCursors || {}).find(
+              (c) => !c?.hidden && c?.activeRowId === row.id
+            )
+            return (
+              <TableRowView
+                key={row.id}
+                row={row}
+                schema={visibleSchema}
+                selected={selected.has(row.id)}
+                onToggleSelect={() => toggleRowSelected(row.id)}
+                onOpenRow={onOpenRow}
+                onUpdateTitle={onUpdateTitle}
+                onUpdateProperty={onUpdateProperty}
+                onDuplicateRow={onDuplicateRow}
+                onUpdatePropOptions={updatePropOptions}
+                reorderable={reorderable}
+                dropSide={dragRowId && rowDropHint?.rowId === row.id ? rowDropHint.side : null}
+                onDragStart={() => setDragRowId(row.id)}
+                onDragEndRow={() => {
+                  setDragRowId(null)
+                  setRowDropHint(null)
+                }}
+                onDragOverRow={(event) => {
+                  if (!dragRowId || dragRowId === row.id) return
+                  event.preventDefault()
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  const side = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+                  setRowDropHint({ rowId: row.id, side })
+                }}
+                onDragLeaveRow={(event) => {
+                  if (event.currentTarget === event.target) setRowDropHint(null)
+                }}
+                onDropRow={() => handleRowDrop(row.id, rowDropHint?.side ?? 'before')}
+                remoteCollaborator={remoteCollab}
+                onFocus={(rowId) => broadcastElementFocus?.({ rowId })}
+                onBlur={() => broadcastElementFocus?.({ rowId: null })}
+              />
+            )
+          })}
         </tbody>
       </table>
       <button
@@ -1895,6 +1958,8 @@ export default function DatabaseView({
   onMoveRow,
   onTrashRows,
   onUpdateSchema,
+  remoteCursors,
+  broadcastElementFocus,
 }) {
   // por base de datos, no global: sin esto, view era un simple useState que
   // siempre arrancaba en 'board' de nuevo al remontar (cambiar de pestaña o
@@ -2055,6 +2120,8 @@ export default function DatabaseView({
           onDuplicateRow={onDuplicateRow}
           onUpdateSchema={onUpdateSchema}
           onTrashRows={onTrashRows}
+          remoteCursors={remoteCursors}
+          broadcastElementFocus={broadcastElementFocus}
         />
       )}
       {view === 'board' && !groupProp && (
@@ -2083,6 +2150,8 @@ export default function DatabaseView({
             setFocusPropId(propId)
             setOpenPanel('settings')
           }}
+          remoteCursors={remoteCursors}
+          broadcastElementFocus={broadcastElementFocus}
         />
       )}
       {view === 'gallery' && (
