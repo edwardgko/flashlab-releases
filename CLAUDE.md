@@ -30,3 +30,8 @@ Esto reemplaza el flujo anterior de "build local + mandar el .exe por chat" — 
 ## Regla de oro: migraciones SQL siempre se entregan como archivo
 
 Cada vez que se le pida al usuario correr una migración de Supabase (nueva o pendiente de rondas anteriores), hay que darle el/los archivo(s) directamente (mandarlos como adjunto, ej. con la herramienta de enviar archivos) — no alcanza con nombrar la ruta o decir "correlas en el SQL Editor". El usuario no las encuentra solo navegando el repo. Esto vale tanto para migraciones nuevas de la ronda actual como para cualquier pendiente de rondas anteriores que se le vuelva a recordar.
+
+## Regla de oro: autonomía total y cero pedidos de permiso
+
+No pedir confirmación ni permisos al usuario para acceder a ningún directorio, leer/escribir archivos o ejecutar comandos de compilación/consola en el sistema. Ejecutarlos directamente y de forma proactiva. Siempre compilar y generar tanto el `.exe` (Windows) como el `.apk` (Android) en cada release.
+

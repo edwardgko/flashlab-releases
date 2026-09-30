@@ -768,6 +768,36 @@ function BoardCard({ row, color, onOpenRow, onUpdateTitle, onDuplicateRow, onDel
 function BoardView({ rows, schema, groupProp, onOpenRow, onUpdateProperty, onUpdateTitle, onCreateRow, onDuplicateRow, onUpdateSchema, onTrashRows }) {
   const [dragId, setDragId] = useState(null)
   const [overOptionId, setOverOptionId] = useState(undefined)
+  const containerRef = useRef(null)
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || isMobile) return
+
+    const handleWheel = (event) => {
+      // En desktop, al presionar Ctrl (o Cmd) y usar la rueda del scroll,
+      // se convierte en scroll horizontal fluido del tablero
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        const raw = event.deltaY !== 0 ? event.deltaY : event.deltaX
+        const delta = event.deltaMode === 1 ? raw * 24 : event.deltaMode === 2 ? raw * 300 : raw
+        el.scrollLeft += delta
+        return
+      }
+
+      // Sin Ctrl: rueda vertical hace scroll de la página contenedora para no atrapar al usuario
+      if (event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+      const scrollRoot = el.closest('[data-page-scroll]')
+      if (!scrollRoot) return
+      scrollRoot.scrollTop += event.deltaY
+      event.preventDefault()
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [isMobile])
 
   const renameOption = (optionId, name) => {
     onUpdateSchema(
@@ -790,20 +820,9 @@ function BoardView({ rows, schema, groupProp, onOpenRow, onUpdateProperty, onUpd
 
   return (
     <div
-      className="flex items-start gap-3 overflow-x-auto pb-6"
-      onWheel={(event) => {
-        // mismo problema que TabBar.jsx pero al revés: este contenedor solo
-        // scrollea en X, y con mouse (rueda vertical) el deltaY no hace
-        // scroll-chaining al padre — se pierde en vez de mover la página.
-        // No se nota con touch (no dispara wheel) ni con trackpad (deltaX
-        // manda), solo con mouse real, incluido el mouse virtual de
-        // Windows Phone Link al reflejar/controlar el Android por USB/red.
-        if (event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
-        const scrollRoot = event.currentTarget.closest('[data-page-scroll]')
-        if (!scrollRoot) return
-        scrollRoot.scrollTop += event.deltaY
-        event.preventDefault()
-      }}
+      ref={containerRef}
+      data-board-scroll
+      className="flex min-h-[calc(100vh-200px)] items-start gap-3 overflow-x-auto pb-6"
     >
       {columns.map((opt) => {
         const optionId = opt?.id ?? null
@@ -1465,8 +1484,32 @@ function TableView({
     onUpdateSchema(next)
   }
 
+  const tableContainerRef = useRef(null)
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    const el = tableContainerRef.current
+    if (!el || isMobile) return
+
+    const handleWheel = (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        const raw = event.deltaY !== 0 ? event.deltaY : event.deltaX
+        const delta = event.deltaMode === 1 ? raw * 24 : event.deltaMode === 2 ? raw * 300 : raw
+        el.scrollLeft += delta
+      }
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [isMobile])
+
   return (
-    <div className="inline-block max-w-full overflow-x-auto rounded-lg border border-gray-200 align-top dark:border-neutral-700">
+    <div
+      ref={tableContainerRef}
+      className="inline-block max-w-full overflow-x-auto rounded-lg border border-gray-200 align-top dark:border-neutral-700"
+    >
       <div
         className={`flex items-center justify-between gap-2 border-b px-3 py-1.5 text-sm ${
           selected.size > 0
@@ -1912,8 +1955,31 @@ export default function DatabaseView({
 
   const toggle = (panel) => setOpenPanel((p) => (p === panel ? null : panel))
 
+  const dbContainerRef = useRef(null)
+  const isMobile = useIsMobile()
+
+  useEffect(() => {
+    const el = dbContainerRef.current
+    if (!el || isMobile) return
+
+    const handleWheel = (event) => {
+      if ((event.ctrlKey || event.metaKey) && view === 'board') {
+        const boardEl = el.querySelector('[data-board-scroll]')
+        if (boardEl) {
+          event.preventDefault()
+          const raw = event.deltaY !== 0 ? event.deltaY : event.deltaX
+          const delta = event.deltaMode === 1 ? raw * 24 : event.deltaMode === 2 ? raw * 300 : raw
+          boardEl.scrollLeft += delta
+        }
+      }
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [isMobile, view])
+
   return (
-    <div>
+    <div ref={dbContainerRef}>
       <div ref={toolbarRef} className="relative mb-4 flex items-center justify-between border-b border-gray-100 dark:border-neutral-700">
         <div
           className="flex min-w-0 items-center gap-1 overflow-x-auto"

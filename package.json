@@ -4,7 +4,7 @@
   "description": "Clon local de Notion: Electron + React + Editor.js, todo en tu disco.",
   "author": "flashlab",
   "private": true,
-  "version": "0.1.74",
+  "version": "0.1.75",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
