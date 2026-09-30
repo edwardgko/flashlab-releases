@@ -29,6 +29,10 @@ if (token) {
   process.env.GITHUB_TOKEN = token;
 }
 
+process.on('uncaughtException', (err) => {
+  console.log('(Aviso de conexión ignorado:', err.message, ')');
+});
+
 function ghRequest(options, data = null) {
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -36,6 +40,7 @@ function ghRequest(options, data = null) {
       headers: {
         'User-Agent': 'flashlab-auto-release',
         'Authorization': 'Bearer ' + token,
+        'Connection': 'close',
         ...(options.headers || {})
       }
     }, (res) => {
