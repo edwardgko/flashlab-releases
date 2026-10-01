@@ -588,6 +588,7 @@ export default function PageView({
     handleMouseMove,
     handleMouseLeave,
     broadcastElementFocus,
+    broadcastCaretMove,
   } = usePagePresence(page.id, session, scrollContainerRef)
   const isOwner = !isDesktop || !page.ownerId || page.ownerId === session?.user?.id
   const [remoteChange, setRemoteChange] = useState(false)

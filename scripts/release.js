@@ -113,8 +113,18 @@ execSync('vite build', { stdio: 'inherit' });
 
 // 4. Empaquetar con electron-builder
 console.log('\n📦 Empaquetando con electron-builder...');
+const localBuildDir = 'C:/flashlab-build/release';
 try {
-  execSync('electron-builder --publish always', {
+  if (fs.existsSync(localBuildDir)) {
+    for (const f of fs.readdirSync(localBuildDir)) {
+      if (f.startsWith(`FlashLab Setup ${version}`) || f.startsWith(`FlashLab-Setup-${version}`)) {
+        fs.unlinkSync(path.join(localBuildDir, f));
+      }
+    }
+  }
+} catch {}
+try {
+  execSync('electron-builder --publish never', {
     stdio: 'inherit',
     env: { ...process.env, GH_TOKEN: token, GITHUB_TOKEN: token }
   });
@@ -139,10 +149,6 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
   const existing = assets.find(a => a.name === assetName);
 
   if (existing) {
-    if (existing.size === fileSize) {
-      console.log(`✓ ${assetName} ya está subido en GitHub con el tamaño correcto (${(fileSize / 1024 / 1024).toFixed(2)} MB).`);
-      return;
-    }
     console.log(`🔄 Reemplazando ${assetName} existente en GitHub...`);
     await ghRequest({
       hostname: 'api.github.com',
@@ -221,7 +227,13 @@ async function ensureAllAssets() {
     blockmapPath = path.join(buildDir, `FlashLab Setup ${version}.exe.blockmap`);
   }
 
-  const ymlPath = path.join(buildDir, 'latest.yml');
+  const userDesktopPath = `C:/Users/edwar/OneDrive/Desktop/Desktop 1/Programas/FlashLab-Setup-${version}.exe`;
+  try {
+    fs.copyFileSync(exePath, userDesktopPath);
+    console.log(`✓ Copiado instalador a ${userDesktopPath}`);
+  } catch (copyErr) {
+    console.warn(`(Aviso copiando al escritorio: ${copyErr.message})`);
+  }
 
   await uploadAsset(releaseId, exeName, exePath);
   await uploadAsset(releaseId, blockmapName, blockmapPath);
