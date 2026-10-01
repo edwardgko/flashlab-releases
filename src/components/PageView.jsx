@@ -72,10 +72,8 @@ const RENAME_DELAY_MS = 400
 // cada cuánto se vuelve a intentar aplicar un cambio remoto que quedó
 // esperando porque se estaba escribiendo. Corto: apenas soltás el teclado y
 // sacás el foco del editor, entra sola.
-const REMOTE_RELOAD_RETRY_MS = 2500
-// el autoguardado ajeno dispara cada 800ms mientras la otra persona escribe:
-// sin agrupar, cada uno sería una recarga y la página parpadearía
-const REMOTE_APPLY_DEBOUNCE_MS = 2000
+const REMOTE_RELOAD_RETRY_MS = 1500
+const REMOTE_APPLY_DEBOUNCE_MS = 300
 // cortacircuitos: más de estas recargas automáticas dentro de la ventana y se
 // vuelve al cartel manual — un bucle de comparación jamás puede degenerar en
 // una pantalla parpadeando
@@ -602,10 +600,23 @@ export default function PageView({
     lastContentRef.current = stableStringify(data ?? null)
   }, [])
 
-  const handleReloadRemote = useCallback(() => {
+  const handleReloadRemote = useCallback(async () => {
     setRemoteChange(false)
+    if (!isMobile) {
+      try {
+        const fresh = await api.getPage(page.id)
+        if (fresh?.content) {
+          window.dispatchEvent(
+            new CustomEvent(`flashlab:remote-page-content-${page.id}`, { detail: fresh.content })
+          )
+          return
+        }
+      } catch (err) {
+        console.error('Error al sincronizar contenido remoto:', err)
+      }
+    }
     setReloadNonce((n) => n + 1)
-  }, [])
+  }, [page.id, isMobile])
 
   // ¿se puede recargar el editor de una sin arruinarle el trabajo a nadie?
   // Recargar remonta Editor/MobileEditor (ver la `key` con reloadNonce más
@@ -613,7 +624,7 @@ export default function PageView({
   // que todavía no llegó al autoguardado. Eso está perfecto si nadie está
   // escribiendo, y es inaceptable si sí. Dos señales:
   //   - status 'saving': hay un guardado en vuelo, o sea que se tipeó hace
-  //     menos de 800ms (el debounce de AUTOSAVE_DELAY_MS).
+  //     menos de 400ms (el debounce de AUTOSAVE_DELAY_MS).
   //   - el foco está DENTRO del editor: aunque no se esté tipeando ahora
   //     mismo, el cursor está puesto y perderlo se siente como un salto.
   const statusRef = useRef(status)
@@ -627,7 +638,7 @@ export default function PageView({
 
   // Sincronización con otras personas en la MISMA página compartida.
   // En desktop se aplica in-place (editor.render) sin remontar ni destruir
-  // el DOM del editor, evitando cualquier parpadeo de pantalla.
+  // el DOM del editor, eliminando por completo cualquier parpadeo de pantalla.
   useEffect(() => {
     if (page.isDatabase) return undefined
     setRemoteChange(false)
@@ -644,10 +655,20 @@ export default function PageView({
 
     const applyRemote = () => {
       if (cancelled) return
+
+      // En desktop, aplicar el contenido remoto in-place en Editor.js mediante CustomEvent
+      // sin desmontar el componente ni destruir el DOM, eliminando por completo el parpadeo blanco
+      if (!isMobile && latestRemoteContent) {
+        window.dispatchEvent(
+          new CustomEvent(`flashlab:remote-page-content-${page.id}`, { detail: latestRemoteContent })
+        )
+        setRemoteChange(false)
+        return
+      }
+
       if (isEditingNow()) {
-        // no pisar lo que se está escribiendo: mostrar el aviso y volver a
-        // intentar sola en un rato. Sin este reintento, quedarse con el
-        // cursor puesto en la página dejaba el cartel colgado para siempre.
+        // no pisar lo que se está escribiendo en mobile: mostrar el aviso y volver a
+        // intentar sola en un rato.
         setRemoteChange(true)
         clearTimeout(retryTimer)
         retryTimer = setTimeout(applyRemote, REMOTE_RELOAD_RETRY_MS)
@@ -662,16 +683,6 @@ export default function PageView({
       if (burstCount > REMOTE_MAX_BURST) {
         console.warn('[liveSync] demasiadas recargas seguidas, se vuelve al aviso manual')
         setRemoteChange(true)
-        return
-      }
-
-      // En desktop, aplicar el contenido remoto in-place en Editor.js mediante CustomEvent
-      // sin desmontar el componente ni destruir el DOM, eliminando por completo el parpadeo blanco
-      if (!isMobile && latestRemoteContent) {
-        window.dispatchEvent(
-          new CustomEvent(`flashlab:remote-page-content-${page.id}`, { detail: latestRemoteContent })
-        )
-        setRemoteChange(false)
         return
       }
 
@@ -1221,6 +1232,8 @@ export default function PageView({
                 onUpdateSchema={onUpdateSchema}
                 remoteCursors={remoteCursors}
                 broadcastElementFocus={broadcastElementFocus}
+                broadcastCaretMove={broadcastCaretMove}
+                scrollContainerRef={scrollContainerRef}
               />
             ) : (
               <>
@@ -1261,13 +1274,15 @@ export default function PageView({
                     />
                   ) : (
                     <Editor
-                      key={`${page.id}-${reloadNonce}`}
+                      key={page.id}
                       pageId={page.id}
                       onStatusChange={setStatus}
                       onNavigatePage={handleNavigatePage}
                       onContentSynced={handleContentSynced}
                       remoteCursors={remoteCursors}
                       broadcastElementFocus={broadcastElementFocus}
+                      broadcastCaretMove={broadcastCaretMove}
+                      scrollContainerRef={scrollContainerRef}
                     />
                   )}
                 </div>

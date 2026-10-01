@@ -14,8 +14,9 @@ import ToggleTool from '../lib/editorTools/ToggleTool.js'
 import PageLinkTool from '../lib/editorTools/PageLinkTool.js'
 import DeletableImageTool from '../lib/editorTools/DeletableImageTool.js'
 import { imageUploader } from '../lib/editorTools/imageUploader.js'
+import { getCaretCoordinates } from '../lib/caretTracker.js'
 
-const AUTOSAVE_DELAY_MS = 800
+const AUTOSAVE_DELAY_MS = 400
 
 // Editor.js viene en inglés por defecto — traduce su UI nativa (toolbox,
 // popover de conversión, tunes de bloque) y los strings propios de cada
@@ -140,6 +141,8 @@ export default function Editor({
   onContentSynced,
   remoteCursors,
   broadcastElementFocus,
+  broadcastCaretMove,
+  scrollContainerRef,
 }) {
   const holderRef = useRef(null)
   const editorRef = useRef(null)
@@ -301,8 +304,8 @@ export default function Editor({
   }, [pageId, scheduleSave, onStatusChange, onNavigatePage, onContentSynced])
 
   // Sincronización in-place cuando otra persona edita la misma página:
-  // usa editor.render() sin desmontar ni destruir el DOM del editor, evitando
-  // parpadeos y preservando el scroll y el estado.
+  // usa editor.render() únicamente si la estructura de bloques cambió (agregar/quitar bloques),
+  // evitando por completo el parpadeo blanco si el texto ya fue actualizado en vivo por broadcast.
   useEffect(() => {
     const onRemoteContent = async (event) => {
       const incoming = event.detail
@@ -314,8 +317,30 @@ export default function Editor({
 
       try {
         await editor.isReady
+        const currentData = await editor.save()
+        // Comparar bloques: si ya coinciden gracias a la sincronización en vivo,
+        // no tocar el DOM para evitar cualquier parpadeo de pantalla.
+        const currentStr = (currentData?.blocks || []).map((b) => `${b.id}:${b.type}:${JSON.stringify(b.data)}`).join('|')
+        const incomingStr = (incoming.blocks || []).map((b) => `${b.id}:${b.type}:${JSON.stringify(b.data)}`).join('|')
+        if (currentStr === incomingStr) {
+          onContentSynced?.(incoming)
+          return
+        }
+
+        const activeEl = document.activeElement
+        const activeBlock = activeEl?.closest('.ce-block')
+        const activeBlockId = activeBlock?.dataset?.id
+
         await editor.render({ blocks: incoming.blocks })
         onContentSynced?.(incoming)
+
+        if (activeBlockId && holderRef.current) {
+          const restoredBlock = holderRef.current.querySelector(`.ce-block[data-id="${activeBlockId}"]`)
+          const restoredEditable = restoredBlock?.querySelector('[contenteditable="true"]')
+          if (restoredEditable) {
+            restoredEditable.focus()
+          }
+        }
       } catch (err) {
         console.warn('Error al aplicar contenido remoto en Editor.js:', err)
       }
@@ -327,45 +352,79 @@ export default function Editor({
     }
   }, [pageId, onContentSynced])
 
-  // Notificar a los demás colaboradores qué bloque / línea estamos editando
+  // Rastrear y notificar la posición exacta del cursor de texto (caret)
+  // y emitir el texto que se escribe en vivo en cada pulsación de tecla
   useEffect(() => {
     const holder = holderRef.current
-    if (!holder || !broadcastElementFocus) return
+    const scrollContainer = scrollContainerRef?.current
+    if (!holder || !scrollContainer || !broadcastCaretMove) return
 
-    const updateFocusedBlock = () => {
+    const handleCaretAndLiveText = () => {
       const activeEl = document.activeElement
       if (!activeEl || !holder.contains(activeEl)) return
 
-      const blockEl = activeEl.closest('.ce-block')
-      if (!blockEl) return
-
-      const blockId = blockEl.dataset?.id || null
-      const allBlocks = Array.from(holder.querySelectorAll('.ce-block'))
-      const blockIndex = allBlocks.indexOf(blockEl)
-
-      if (blockIndex >= 0) {
-        broadcastElementFocus({ blockIndex, blockId })
+      const caretData = getCaretCoordinates(scrollContainer)
+      if (caretData) {
+        broadcastCaretMove(caretData)
+        if (broadcastElementFocus && caretData.blockIndex != null) {
+          broadcastElementFocus({ blockIndex: caretData.blockIndex, blockId: caretData.blockId })
+        }
       }
     }
 
     const handleBlur = (e) => {
       if (!holder.contains(e.relatedTarget)) {
-        broadcastElementFocus({ blockIndex: null, blockId: null })
+        broadcastCaretMove({ clear: true })
+        broadcastElementFocus?.({ blockIndex: null, blockId: null })
       }
     }
 
-    holder.addEventListener('focusin', updateFocusedBlock)
-    holder.addEventListener('click', updateFocusedBlock)
-    holder.addEventListener('keyup', updateFocusedBlock)
+    holder.addEventListener('input', handleCaretAndLiveText)
+    holder.addEventListener('keyup', handleCaretAndLiveText)
+    holder.addEventListener('click', handleCaretAndLiveText)
+    holder.addEventListener('focusin', handleCaretAndLiveText)
     holder.addEventListener('focusout', handleBlur)
 
-    return () => {
-      holder.removeEventListener('focusin', updateFocusedBlock)
-      holder.removeEventListener('click', updateFocusedBlock)
-      holder.removeEventListener('keyup', updateFocusedBlock)
-      holder.removeEventListener('focusout', handleBlur)
+    const onDocSelectionChange = () => {
+      if (holder.contains(document.activeElement)) {
+        handleCaretAndLiveText()
+      }
     }
-  }, [broadcastElementFocus])
+    document.addEventListener('selectionchange', onDocSelectionChange)
+
+    return () => {
+      holder.removeEventListener('input', handleCaretAndLiveText)
+      holder.removeEventListener('keyup', handleCaretAndLiveText)
+      holder.removeEventListener('click', handleCaretAndLiveText)
+      holder.removeEventListener('focusin', handleCaretAndLiveText)
+      holder.removeEventListener('focusout', handleBlur)
+      document.removeEventListener('selectionchange', onDocSelectionChange)
+    }
+  }, [scrollContainerRef, broadcastCaretMove, broadcastElementFocus])
+
+  // Sincronizar en tiempo real el texto que otros colaboradores están escribiendo
+  // (se aplica directo al bloque sin llamar a editor.render(), sin parpadeo de pantalla)
+  useEffect(() => {
+    const holder = holderRef.current
+    if (!holder || !remoteCursors) return
+
+    Object.values(remoteCursors).forEach((c) => {
+      if (!c || c.hidden || !c.activeBlockId || c.liveHtml == null) return
+
+      const activeEl = document.activeElement
+      const localBlock = activeEl?.closest('.ce-block')
+      // Si el usuario local está escribiendo en este mismo bloque, no pisarlo
+      if (localBlock && localBlock.dataset?.id === c.activeBlockId) return
+
+      const targetBlock = holder.querySelector(`.ce-block[data-id="${c.activeBlockId}"]`)
+      if (!targetBlock) return
+
+      const editable = targetBlock.querySelector('[contenteditable="true"]')
+      if (editable && editable.innerHTML !== c.liveHtml) {
+        editable.innerHTML = c.liveHtml
+      }
+    })
+  }, [remoteCursors])
 
   // Mostrar visualmente en qué bloque / línea está ubicado cada colaborador
   // (barra lateral izquierda en el bloque + badge con su nombre, estilo Google Docs / Word)

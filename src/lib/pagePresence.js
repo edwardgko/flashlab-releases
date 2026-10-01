@@ -125,6 +125,30 @@ export function usePagePresence(pageId, session, scrollContainerRef) {
           }
         })
       })
+      .on('broadcast', { event: 'caret-move' }, ({ payload }) => {
+        if (!payload || payload.userId === myId) return
+        setRemoteCursors((prev) => {
+          const existing = prev[payload.userId] || {
+            userId: payload.userId,
+            name: payload.name,
+            color: payload.color,
+          }
+          return {
+            ...prev,
+            [payload.userId]: {
+              ...existing,
+              name: payload.name || existing.name,
+              color: payload.color || existing.color,
+              caret: payload.clear ? null : payload.caret,
+              activeBlockId: payload.clear ? null : (payload.blockId ?? existing.activeBlockId),
+              activeBlockIndex: payload.clear ? null : (payload.blockIndex ?? existing.activeBlockIndex),
+              liveHtml: payload.html ?? existing.liveHtml,
+              liveText: payload.text ?? existing.liveText,
+              lastSeen: Date.now(),
+            },
+          }
+        })
+      })
 
     channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
@@ -238,6 +262,36 @@ export function usePagePresence(pageId, session, scrollContainerRef) {
     [myId, myName, myColor]
   )
 
+  // 4. Notificar la posición exacta del cursor de texto (caret) y contenido en vivo del bloque
+  const lastCaretSendTimeRef = useRef(0)
+  const broadcastCaretMove = useCallback(
+    ({ caret = null, blockId = null, blockIndex = null, html = null, text = null, clear = false }) => {
+      const channel = channelRef.current
+      if (!channel) return
+
+      const now = performance.now()
+      if (!clear && now - lastCaretSendTimeRef.current < 35) return
+      lastCaretSendTimeRef.current = now
+
+      channel.send({
+        type: 'broadcast',
+        event: 'caret-move',
+        payload: {
+          userId: myId,
+          name: myName,
+          color: myColor,
+          caret,
+          blockId,
+          blockIndex,
+          html,
+          text,
+          clear,
+        },
+      })
+    },
+    [myId, myName, myColor]
+  )
+
   return {
     collaborators,
     remoteCursors,
@@ -245,5 +299,6 @@ export function usePagePresence(pageId, session, scrollContainerRef) {
     handleMouseMove,
     handleMouseLeave,
     broadcastElementFocus,
+    broadcastCaretMove,
   }
 }
