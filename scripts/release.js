@@ -227,6 +227,8 @@ async function ensureAllAssets() {
     blockmapPath = path.join(buildDir, `FlashLab Setup ${version}.exe.blockmap`);
   }
 
+  const ymlPath = path.join(buildDir, 'latest.yml');
+
   const userDesktopPath = `C:/Users/edwar/OneDrive/Desktop/Desktop 1/Programas/FlashLab-Setup-${version}.exe`;
   try {
     fs.copyFileSync(exePath, userDesktopPath);
