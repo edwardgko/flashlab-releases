@@ -487,7 +487,7 @@ export default function App({ theme, setTheme }) {
     try {
       const copy = await api.duplicatePage(id)
       if (!copy) return
-      patchActiveTab({ kind: 'page' })
+      patchActiveTab({ kind: 'page', pageId: copy.id })
       await syncFromBackend(copy.id)
     } catch (err) {
       console.error('no se pudo duplicar la página:', err)

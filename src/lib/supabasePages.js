@@ -238,17 +238,13 @@ export function createSupabasePagesAPI() {
     // mismo comportamiento que la versión local: copia el subárbol activo
     // entero como hermano justo después del original.
     duplicatePage: async (id) => {
-      // owner_id de la copia es SIEMPRE quien duplica, no el original — si
-      // no, duplicar una página compartida (no tuya) viola pages_insert_access
-      // (exige owner_id = auth.uid()) y el insert falla en silencio, sin
-      // try/catch en el caller (ver duplicatePage en App.jsx): el botón "no
-      // hace nada" es justo ese error tragado.
       const ownerId = await currentUserId()
       const allPages = unwrap(await supabase.from('pages').select('*').is('trashed_at', null))
       const byId = new Map(allPages.map((p) => [p.id, p]))
       const root = byId.get(id)
       if (!root) return null
 
+      // Recorrido BFS para que los padres siempre queden antes que sus hijos
       const subtreeIds = [id]
       for (let i = 0; i < subtreeIds.length; i++) {
         for (const p of allPages) if (p.parent_id === subtreeIds[i]) subtreeIds.push(p.id)
@@ -256,48 +252,116 @@ export function createSupabasePagesAPI() {
       const originals = subtreeIds.map((pid) => byId.get(pid)).filter(Boolean)
       const idMap = new Map(originals.map((p) => [p.id, crypto.randomUUID()]))
 
-      const siblings = await siblingsOf(root.parent_id ?? null)
-      const rootIdx = siblings.findIndex((p) => p.id === id)
-      const insertAt = rootIdx === -1 ? siblings.length : rootIdx + 1
-      const toShift = siblings.slice(insertAt)
-      if (toShift.length) {
-        await Promise.all(
-          toShift.map((s) => supabase.from('pages').update({ order_index: s.order_index + 1 }).eq('id', s.id))
-        )
+      // Verificar permisos en el parent_id destino: si es una carpeta compartida sin
+      // permiso de edición, duplicar la copia en el nivel raíz (parent_id: null)
+      let finalParentId = root.parent_id ?? null
+      if (finalParentId) {
+        try {
+          const { data: canEditParent } = await supabase.rpc('has_access', {
+            target_page_id: finalParentId,
+            uid: ownerId,
+            min_role: 'editor',
+          })
+          if (!canEditParent) finalParentId = null
+        } catch {
+          // Si falla la verificación, continuar con el parentId original y fallback si falla el insert
+        }
       }
 
-      const newRows = originals.map((orig) => {
-        const isRoot = orig.id === id
-        return {
-          id: idMap.get(orig.id),
-          owner_id: ownerId,
-          parent_id: isRoot ? (root.parent_id ?? null) : idMap.get(orig.parent_id),
-          title: isRoot ? `${orig.title || 'Sin título'} (copia)` : orig.title,
-          icon: orig.icon,
-          is_database: orig.is_database,
-          database_schema: orig.database_schema,
-          properties: orig.properties,
-          order_index: isRoot ? insertAt : orig.order_index,
-          trashed_at: null,
+      // Reordenar hermanos si aplica
+      let insertAt = 0
+      try {
+        const siblings = await siblingsOf(finalParentId)
+        const rootIdx = siblings.findIndex((p) => p.id === id)
+        insertAt = rootIdx === -1 ? siblings.length : rootIdx + 1
+        const toShift = siblings.slice(insertAt)
+        if (toShift.length) {
+          await Promise.all(
+            toShift.map((s) => supabase.from('pages').update({ order_index: s.order_index + 1 }).eq('id', s.id))
+          )
         }
-      })
-      const inserted = unwrap(await supabase.from('pages').insert(newRows).select())
+      } catch (err) {
+        console.warn('No se pudo reordenar hermanos:', err)
+      }
 
-      const contentsRows = unwrap(
-        await supabase
+      // 1. Insertar la página RAÍZ primero de manera individual para que ya exista
+      // y esté confirmada en public.pages antes de insertar cualquier página hija.
+      // (Si se insertaran juntas en un solo batch, Postgres evalúa pages_insert_access
+      // en las hijas llamando a has_access(parent_id) antes de que la raíz sea visible,
+      // fallando con violación de RLS).
+      const rootOrig = originals[0]
+      const rootCopyId = idMap.get(id)
+      const rootRow = {
+        id: rootCopyId,
+        owner_id: ownerId,
+        parent_id: finalParentId,
+        title: `${rootOrig.title || 'Sin título'} (copia)`,
+        icon: rootOrig.icon ?? null,
+        is_database: Boolean(rootOrig.is_database),
+        database_schema: rootOrig.database_schema ?? null,
+        properties: rootOrig.properties ?? null,
+        order_index: insertAt,
+        trashed_at: null,
+      }
+
+      let insertedRoot = null
+      try {
+        insertedRoot = unwrap(await supabase.from('pages').insert(rootRow).select().single())
+      } catch (insertErr) {
+        // Si falló por RLS en el parent_id, intentar insertar en la raíz (parent_id = null)
+        if (rootRow.parent_id != null) {
+          rootRow.parent_id = null
+          insertedRoot = unwrap(await supabase.from('pages').insert(rootRow).select().single())
+        } else {
+          throw insertErr
+        }
+      }
+
+      // 2. Insertar los hijos en orden topológico (cada hijo ya encuentra a su padre existente)
+      if (originals.length > 1) {
+        for (let i = 1; i < originals.length; i++) {
+          const orig = originals[i]
+          const childRow = {
+            id: idMap.get(orig.id),
+            owner_id: ownerId,
+            parent_id: idMap.get(orig.parent_id),
+            title: orig.title,
+            icon: orig.icon ?? null,
+            is_database: Boolean(orig.is_database),
+            database_schema: orig.database_schema ?? null,
+            properties: orig.properties ?? null,
+            order_index: orig.order_index ?? i,
+            trashed_at: null,
+          }
+          try {
+            unwrap(await supabase.from('pages').insert(childRow))
+          } catch (childErr) {
+            console.warn('Error insertando subpágina duplicada:', orig.id, childErr)
+          }
+        }
+      }
+
+      // 3. Copiar contenidos de page_contents
+      try {
+        const { data: contentsRows } = await supabase
           .from('page_contents')
           .select('page_id, content')
           .in('page_id', originals.map((o) => o.id))
-      )
-      const contentById = new Map(contentsRows.map((c) => [c.page_id, c.content]))
-      const newContents = originals.map((orig) => ({
-        page_id: idMap.get(orig.id),
-        content: contentById.get(orig.id) ?? { blocks: [] },
-      }))
-      unwrap(await supabase.from('page_contents').insert(newContents))
 
-      const rootCopy = inserted.find((p) => p.id === idMap.get(id))
-      return toJsPage(rootCopy)
+        const contentById = new Map((contentsRows || []).map((c) => [c.page_id, c.content]))
+        const newContents = originals.map((orig) => ({
+          page_id: idMap.get(orig.id),
+          content: contentById.get(orig.id) ?? { blocks: [] },
+        }))
+
+        await Promise.all(
+          newContents.map((nc) => supabase.from('page_contents').upsert(nc))
+        )
+      } catch (contentErr) {
+        console.warn('Error al copiar contenido de página duplicada:', contentErr)
+      }
+
+      return toJsPage(insertedRoot)
     },
 
     movePage: async (id, newParentId = null, newIndex = null) => {

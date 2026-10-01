@@ -744,7 +744,7 @@ function BoardCard({
           <button
             type="button"
             aria-label="Eliminar"
-            title="Eliminar"
+            title={confirmDelete ? 'Clic de nuevo para confirmar eliminación' : 'Eliminar'}
             onClick={(event) => {
               event.stopPropagation()
               if (confirmDelete) onDeleteRow(row.id)
@@ -918,8 +918,9 @@ function BoardView({
             </div>
             <button
               type="button"
+              title="Nueva página"
               onClick={() => onCreateRow({ [groupProp.id]: optionId })}
-              className="mt-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] text-gray-400 hover:bg-black/[0.04] hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.06] dark:hover:text-neutral-300"
+              className="cursor-pointer mt-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[13px] text-gray-400 hover:bg-black/[0.04] hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.06] dark:hover:text-neutral-300"
             >
               <PlusIcon /> Nueva página
             </button>
@@ -1235,8 +1236,9 @@ function GalleryView({ rows, schema, onOpenRow, onCreateRow, onDuplicateRow }) {
       ))}
       <button
         type="button"
+        title="Nueva página"
         onClick={() => onCreateRow({})}
-        className="flex min-h-[9.5rem] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 text-sm text-gray-400 hover:border-gray-300 hover:text-gray-600 dark:border-neutral-700 dark:text-neutral-500 dark:hover:border-neutral-600 dark:hover:text-neutral-300"
+        className="cursor-pointer flex min-h-[9.5rem] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 text-sm text-gray-400 hover:border-gray-300 hover:text-gray-600 dark:border-neutral-700 dark:text-neutral-500 dark:hover:border-neutral-600 dark:hover:text-neutral-300"
       >
         <PlusIcon /> Nueva página
       </button>
@@ -1331,7 +1333,7 @@ function ListView({ rows, schema, onOpenRow, onCreateRow, onDuplicateRow, onMove
               event.stopPropagation()
               onDuplicateRow?.(row.id)
             }}
-            className="shrink-0 rounded p-1 text-gray-300 opacity-0 hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100 dark:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-300"
+            className="cursor-pointer shrink-0 rounded p-1 text-gray-300 opacity-0 hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100 dark:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-300"
           >
             <DuplicateIcon />
           </button>
@@ -1339,8 +1341,9 @@ function ListView({ rows, schema, onOpenRow, onCreateRow, onDuplicateRow, onMove
       ))}
       <button
         type="button"
+        title="Nueva página"
         onClick={() => onCreateRow({})}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.03] dark:hover:text-neutral-300"
+        className="cursor-pointer flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.03] dark:hover:text-neutral-300"
       >
         <PlusIcon /> Nueva página
       </button>
@@ -1783,8 +1786,9 @@ function TableView({
       </table>
       <button
         type="button"
+        title="Nueva página"
         onClick={() => onCreateRow({})}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.03] dark:hover:text-neutral-300"
+        className="cursor-pointer flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:text-neutral-500 dark:hover:bg-white/[0.03] dark:hover:text-neutral-300"
       >
         <PlusIcon /> Nueva página
       </button>

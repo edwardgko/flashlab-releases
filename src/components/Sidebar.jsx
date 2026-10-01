@@ -171,6 +171,7 @@ function isDescendantLocal(pageMap, ancestorId, pageId) {
 function TreeNode({ page, depth, ctx }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const children = ctx.byParent.get(page.id) ?? []
   // las bases de datos siempre aparecen compactadas en el árbol — sus filas
   // ya se ven en el Tablero/Tabla, desplegarlas acá encima solo agrega ruido
@@ -208,6 +209,7 @@ function TreeNode({ page, depth, ctx }) {
           onDragOver={(event) => ctx.onDragOverItem(event, page)}
           onDrop={(event) => ctx.onDropItem(event, page)}
           onDragLeave={(event) => ctx.onDragLeaveItem(event, page)}
+          onMouseLeave={() => setConfirmDelete(false)}
           className={`group my-0.5 flex items-center rounded-md ${
             active ? 'bg-gray-200 dark:bg-neutral-700' : 'hover:bg-gray-100 dark:hover:bg-neutral-800'
           } ${hint === 'before' ? 'border-t-2 border-blue-400' : ''} ${
@@ -220,7 +222,7 @@ function TreeNode({ page, depth, ctx }) {
               type="button"
               aria-label={isExpanded ? 'Colapsar' : 'Expandir'}
               onClick={() => ctx.toggleExpand(page.id)}
-              className="ml-0.5 shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+              className="ml-0.5 shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
             >
               <Icon d={isExpanded ? ICONS.chevronDown : ICONS.chevronRight} className="h-3 w-3" />
             </button>
@@ -235,7 +237,7 @@ function TreeNode({ page, depth, ctx }) {
               setEditing(true)
             }}
             title="Doble clic para renombrar"
-            className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-1.5 py-1.5 text-left text-sm text-gray-700 dark:text-neutral-300"
+            className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-1.5 py-1.5 text-left text-sm text-gray-700 dark:text-neutral-300 cursor-pointer"
           >
             {/* slot de 20px con TODOS los íconos renderizados al mismo tamaño (20px): imagen,
                 SVG de base de datos y emoji. El emoji a 15px de fuente avanza ~20.6px, así que
@@ -268,27 +270,47 @@ function TreeNode({ page, depth, ctx }) {
           <button
             type="button"
             aria-label={`Nueva subpágina en ${page.title || 'Sin título'}`}
-            onClick={() => {
+            title="Nueva subpágina"
+            onClick={(event) => {
+              event.stopPropagation()
               ctx.expandNode(page.id)
               ctx.onCreateChild(page.id)
             }}
-            className="shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+            className="cursor-pointer shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
           >
             <Icon d={ICONS.plus} />
           </button>
           <button
             type="button"
             aria-label={`Duplicar ${page.title || 'Sin título'}`}
-            onClick={() => ctx.onDuplicate(page.id)}
-            className="shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+            title="Duplicar página"
+            onClick={(event) => {
+              event.stopPropagation()
+              ctx.onDuplicate(page.id)
+            }}
+            className="cursor-pointer shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
           >
             <Icon d={ICONS.duplicate} />
           </button>
           <button
             type="button"
             aria-label={`Enviar a la papelera ${page.title || 'Sin título'}`}
-            onClick={() => ctx.onTrash(page.id)}
-            className="mr-1 shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+            title={confirmDelete ? 'Clic de nuevo para confirmar eliminación' : 'Mover a la papelera'}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (confirmDelete) {
+                setConfirmDelete(false)
+                ctx.onTrash(page.id)
+              } else {
+                setConfirmDelete(true)
+              }
+            }}
+            onMouseLeave={() => setConfirmDelete(false)}
+            className={`cursor-pointer mr-1 shrink-0 rounded p-1 transition-colors ${
+              confirmDelete
+                ? '!bg-red-600 !text-white !opacity-100'
+                : 'text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200'
+            }`}
           >
             <Icon d={ICONS.trash} />
           </button>
@@ -314,8 +336,12 @@ function TrashRow({ page, onRestore, onDeleteForever }) {
       <button
         type="button"
         aria-label={`Restaurar ${page.title || 'Sin título'}`}
-        onClick={() => onRestore(page.id)}
-        className="shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+        title="Restaurar página"
+        onClick={(event) => {
+          event.stopPropagation()
+          onRestore(page.id)
+        }}
+        className="cursor-pointer shrink-0 rounded p-1 text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
       >
         <Icon d={ICONS.restore} />
       </button>
@@ -326,18 +352,24 @@ function TrashRow({ page, onRestore, onDeleteForever }) {
             ? `Confirmar eliminación definitiva de ${page.title || 'Sin título'}`
             : `Eliminar definitivamente ${page.title || 'Sin título'}`
         }
-        onClick={() => (confirming ? onDeleteForever(page.id) : setConfirming(true))}
-        className={`shrink-0 rounded p-1 ${
+        title={confirming ? 'Clic de nuevo para eliminar definitivamente' : 'Eliminar definitivamente'}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (confirming) {
+            setConfirming(false)
+            onDeleteForever(page.id)
+          } else {
+            setConfirming(true)
+          }
+        }}
+        onMouseLeave={() => setConfirming(false)}
+        className={`cursor-pointer shrink-0 rounded p-1 transition-colors ${
           confirming
-            ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
+            ? '!bg-red-600 !text-white !opacity-100'
             : 'text-gray-400 opacity-0 max-md:opacity-100 hover:bg-gray-200 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-200'
         }`}
       >
-        {confirming ? (
-          <span className="px-0.5 text-[10px] font-semibold">¿Borrar?</span>
-        ) : (
-          <Icon d={ICONS.trash} />
-        )}
+        <Icon d={ICONS.trash} />
       </button>
     </div>
   )
@@ -981,8 +1013,9 @@ export default function Sidebar({
         <button
           type="button"
           aria-label={showTrash ? 'Ocultar papelera' : 'Mostrar papelera'}
+          title={showTrash ? 'Ocultar papelera' : 'Mostrar papelera'}
           onClick={() => setShowTrash((s) => !s)}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          className="cursor-pointer flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         >
           <Icon d={ICONS.trash} />
           Papelera {trashedRoots.length > 0 ? `(${trashedRoots.length})` : ''}
@@ -1003,6 +1036,7 @@ export default function Sidebar({
             {trashedRoots.length > 0 && (
               <button
                 type="button"
+                title={confirmingEmpty ? 'Clic de nuevo para vaciar definitivamente' : 'Vaciar papelera'}
                 onClick={() => {
                   if (confirmingEmpty) {
                     setConfirmingEmpty(false)
@@ -1012,9 +1046,9 @@ export default function Sidebar({
                   }
                 }}
                 onMouseLeave={() => setConfirmingEmpty(false)}
-                className={`mt-1 w-full rounded-md px-2 py-1 text-left text-xs font-medium ${
+                className={`cursor-pointer mt-1 w-full rounded-md px-2 py-1 text-left text-xs font-medium transition-colors ${
                   confirmingEmpty
-                    ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
+                    ? '!bg-red-600 !text-white'
                     : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200'
                 }`}
               >
@@ -1028,16 +1062,18 @@ export default function Sidebar({
         <button
           type="button"
           aria-label="Nueva página"
+          title="Nueva página"
           onClick={() => onCreate(null)}
-          className="w-full rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          className="cursor-pointer w-full rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         >
           + Nueva página
         </button>
         <button
           type="button"
           aria-label="Nueva base de datos"
+          title="Nueva base de datos"
           onClick={() => onCreateDatabase(null)}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          className="cursor-pointer flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         >
           <Icon d={ICONS.database} className="h-3.5 w-3.5" />
           Nueva base de datos
