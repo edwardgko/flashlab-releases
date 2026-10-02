@@ -36,13 +36,40 @@ export function previewForMessage(row) {
   return row.content
 }
 
+const recentNotifs = new Map()
+
+function isRecentDuplicate(key) {
+  const now = Date.now()
+  for (const [k, time] of recentNotifs.entries()) {
+    if (now - time > 10000) recentNotifs.delete(k)
+  }
+  if (recentNotifs.has(key)) return true
+  recentNotifs.set(key, now)
+  return false
+}
+
+function hashString(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
 // Dispara una notificación nativa del sistema según la plataforma:
 // - Windows Desktop: toast nativo del SO a través de Electron Notification (con ícono y sonido).
-// - Android: notificación nativa de barra de estado a través de LocalNotifications / Push.
+// - Android: si la app está en segundo plano o cerrada, FCM se encarga directamente vía Android OS;
+//            si está en primer plano y en otra vista, se muestra con LocalNotifications.
 // - Web: HTML5 Notification estándar.
 // Si el usuario tiene la app enfocada y está leyendo ese mismo chat, no se interrumpe.
-export async function notifyNewMessage(title, body, chatKey = null) {
+export async function notifyNewMessage(title, body, chatKey = null, uniqueId = null) {
   if (document.hasFocus() && chatKey && activeChatKey === chatKey) {
+    return
+  }
+
+  const dedupeKey = uniqueId ? String(uniqueId) : `${title}:${body}`
+  if (isRecentDuplicate(dedupeKey)) {
     return
   }
 
@@ -56,16 +83,27 @@ export async function notifyNewMessage(title, body, chatKey = null) {
     }
   }
 
-  // 2. Android (Capacitor LocalNotifications con canal de alta prioridad)
+  // 2. Android (Capacitor)
   if (IS_CAPACITOR) {
+    // Si la app está en segundo plano (minimizada o pantalla bloqueada),
+    // FCM de Google Play Services se encarga de mostrar la notificación
+    // nativa directamente en la barra de estado. NO programamos LocalNotifications
+    // acá porque causaría una notificación duplicada ("aparece 2 veces").
+    if (document.hidden) {
+      return
+    }
+
+    // Si la app está en primer plano (visible pero en otra sección),
+    // mostramos la notificación local con sonido y heads-up banner.
     try {
+      const notifId = (hashString(dedupeKey) % 10000000) + 1
       await LocalNotifications.schedule({
         notifications: [
           {
             title: title || 'FlashLab',
             body: body || '',
-            id: (Date.now() % 10000000) + Math.floor(Math.random() * 1000),
-            channelId: 'fcm_fallback_notification_channel',
+            id: notifId,
+            channelId: 'flashlab_messages',
             smallIcon: 'ic_launcher',
             sound: 'default',
           },

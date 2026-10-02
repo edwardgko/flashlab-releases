@@ -104,12 +104,35 @@ Deno.serve(async (req) => {
   // El chat grupal quedó sin push hasta 2026-08-13, y esa era la mitad del
   // "a veces me llegan las notificaciones y a veces no" que se reportó: en
   // 1:1 llegaban, en grupo no llegaba ninguna nunca.
-  let body: { recipientId?: string; conversationId?: string; preview?: string }
+  let body: {
+    action?: string
+    token?: string
+    platform?: string
+    recipientId?: string
+    conversationId?: string
+    preview?: string
+  }
   try {
     body = await req.json()
   } catch {
     return json({ error: 'JSON inválido' }, 400)
   }
+
+  // 1. Registro directo de token con service_role (bypasea RLS cuando cambia de usuario en el mismo celular)
+  if (body?.action === 'register_token' && body?.token) {
+    const { error: upsertErr } = await admin.from('push_tokens').upsert(
+      {
+        token: body.token,
+        user_id: userData.user.id,
+        platform: body.platform || 'android',
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'token' }
+    )
+    if (upsertErr) return json({ error: upsertErr.message }, 500)
+    return json({ ok: true })
+  }
+
   const { recipientId, conversationId, preview } = body
   if (!preview || (!recipientId && !conversationId)) return json({ error: 'faltan parámetros' }, 400)
 
@@ -173,8 +196,25 @@ Deno.serve(async (req) => {
           message: {
             token,
             notification: { title, body: preview },
-            data: { senderId: userData.user.id, ...(conversationId ? { conversationId } : {}) },
-            android: { priority: 'high' },
+            data: {
+              title,
+              body: preview,
+              senderId: userData.user.id,
+              ...(conversationId ? { conversationId } : {}),
+            },
+            android: {
+              priority: 'HIGH',
+              notification: {
+                channel_id: 'flashlab_messages',
+                sound: 'default',
+                default_sound: true,
+                default_vibrate_timings: true,
+                default_light_settings: true,
+                notification_priority: 'PRIORITY_MAX',
+                visibility: 'PUBLIC',
+                icon: 'ic_launcher',
+              },
+            },
           },
         }),
       })

@@ -1,16 +1,41 @@
 import { PushNotifications } from '@capacitor/push-notifications'
 import { LocalNotifications } from '@capacitor/local-notifications'
+import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from './supabaseClient.js'
+import { notifyNewMessage } from './desktopNotify.js'
+import { sendChatPush } from './chat.js'
 
-// se llama una sola vez por sesión de la app (App.jsx, gateado por
-// IS_CAPACITOR + sesión activa) — un segundo llamado con la app ya
-// registrada no hace nada, evita duplicar listeners si el componente que
-// dispara esto se remonta.
-let registered = false
+let currentUserId = null
+let currentToken = null
+let isInitialized = false
+
+async function persistToken(token, userId) {
+  if (!token || !userId) return
+  try {
+    const { error } = await supabase
+      .from('push_tokens')
+      .upsert(
+        { token, user_id: userId, platform: 'android', updated_at: new Date().toISOString() },
+        { onConflict: 'token' }
+      )
+    if (error) {
+      console.warn('Aviso guardando push token en Supabase:', error.message)
+    }
+    // Doble garantía vía Edge Function con service_role (bypasea cualquier fricción de RLS)
+    await sendChatPush({ action: 'register_token', token, platform: 'android' })
+  } catch (err) {
+    console.warn('Excepción guardando push token:', err)
+  }
+}
 
 export async function setupPushNotifications(myId) {
-  if (registered || !myId) return
-  registered = true
+  if (!myId) return
+  currentUserId = myId
+
+  // Si ya tenemos token de esta sesión o de Firebase, sincronizarlo para este usuario
+  if (currentToken) {
+    persistToken(currentToken, currentUserId)
+  }
 
   // 1. Permisos de Push (Android 13+ exige POST_NOTIFICATIONS en runtime)
   let permStatus = await PushNotifications.checkPermissions()
@@ -18,7 +43,6 @@ export async function setupPushNotifications(myId) {
     permStatus = await PushNotifications.requestPermissions()
   }
   if (permStatus.receive !== 'granted') {
-    registered = false // el usuario puede conceder el permiso más tarde desde Ajustes
     return
   }
 
@@ -32,10 +56,10 @@ export async function setupPushNotifications(myId) {
     console.warn('Error solicitando permisos locales:', err)
   }
 
-  // 3. Crear canales de notificación obligatorios en Android 8+ (Oreo+)
+  // 3. Crear canales de notificación en Android 8+ (Oreo+)
   // importance: 5 = IMPORTANCE_HIGH (muestra banner flotante 'heads-up' y suena)
   const channelConfig = {
-    id: 'fcm_fallback_notification_channel',
+    id: 'flashlab_messages',
     name: 'Mensajes de chat',
     description: 'Notificaciones de mensajes de FlashLab',
     importance: 5,
@@ -47,42 +71,44 @@ export async function setupPushNotifications(myId) {
 
   try {
     await PushNotifications.createChannel(channelConfig)
-    await PushNotifications.createChannel({ ...channelConfig, id: 'flashlab_messages' })
+    await PushNotifications.createChannel({ ...channelConfig, id: 'fcm_fallback_notification_channel' })
     await LocalNotifications.createChannel(channelConfig)
-    await LocalNotifications.createChannel({ ...channelConfig, id: 'flashlab_messages' })
+    await LocalNotifications.createChannel({ ...channelConfig, id: 'fcm_fallback_notification_channel' })
   } catch (err) {
     console.warn('Error configurando canales de notificación:', err)
   }
 
+  if (isInitialized) {
+    // Si ya inicializó listeners, solo re-registramos para refrescar token si hiciera falta
+    await PushNotifications.register()
+    return
+  }
+  isInitialized = true
+
   // 4. Token FCM para notificaciones en segundo plano / app cerrada
   PushNotifications.addListener('registration', async (token) => {
-    const { error } = await supabase
-      .from('push_tokens')
-      .upsert({ token: token.value, user_id: myId, platform: 'android', updated_at: new Date().toISOString() })
-    if (error) console.error('Error guardando push token:', error)
+    currentToken = token.value
+    if (currentUserId) {
+      await persistToken(currentToken, currentUserId)
+    }
   })
 
   PushNotifications.addListener('registrationError', (err) => {
-    console.error('Error de registro push:', err)
+    console.error('Error de registro push en Firebase:', err)
   })
 
-  // 5. Si llega un push con la app en primer plano, mostrarlo con LocalNotifications
+  // 5. Si llega un push con la app en primer plano, gestionar con notifyNewMessage
+  // (evita duplicar si ya se mostró por Realtime o si el usuario está en ese mismo chat)
   PushNotifications.addListener('pushNotificationReceived', async (notification) => {
     try {
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            title: notification.title || 'FlashLab',
-            body: notification.body || '',
-            id: (Date.now() % 10000000) + Math.floor(Math.random() * 1000),
-            channelId: 'fcm_fallback_notification_channel',
-            smallIcon: 'ic_launcher',
-            sound: 'default',
-          },
-        ],
-      })
+      const data = notification.data || {}
+      const senderId = data.senderId
+      const conversationId = data.conversationId
+      const chatKey = conversationId ? `group-${conversationId}` : (senderId ? `dm-${senderId}` : null)
+      const uniqueId = notification.id || data.messageId || `${notification.title}:${notification.body}`
+      await notifyNewMessage(notification.title || 'FlashLab', notification.body || '', chatKey, uniqueId)
     } catch (err) {
-      console.warn('Error mostrando notificación local:', err)
+      console.warn('Error procesando push recibido en primer plano:', err)
     }
   })
 
@@ -92,6 +118,18 @@ export async function setupPushNotifications(myId) {
 
   LocalNotifications.addListener('localNotificationActionPerformed', () => {
     window.focus()
+  })
+
+  // 6. Al volver al primer plano (appStateChange), refrescar registro de push
+  CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
+    if (isActive && currentUserId) {
+      if (currentToken) {
+        persistToken(currentToken, currentUserId)
+      }
+      try {
+        await PushNotifications.register()
+      } catch {}
+    }
   })
 
   await PushNotifications.register()

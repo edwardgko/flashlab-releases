@@ -588,7 +588,7 @@ export default function Sidebar({
       if (notifiedIds.has(id)) return
       if (notifiedIds.size > 200) notifiedIds.clear()
       notifiedIds.add(id)
-      notifyNewMessage(title, body, chatKey)
+      notifyNewMessage(title, body, chatKey, id)
     }
 
     // el aviso en vivo (postgres_changes INSERT) solo dispara si llega

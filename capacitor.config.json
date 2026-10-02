@@ -7,7 +7,7 @@
   },
   "plugins": {
     "PushNotifications": {
-      "presentationOptions": ["badge", "sound", "alert"]
+      "presentationOptions": []
     },
     "LocalNotifications": {
       "smallIcon": "ic_launcher",
