@@ -1,18 +1,29 @@
 import { isDesktop } from './api.js'
-
-// Notification (Web API estándar) — Electron ya la implementa nativa como
-// notificación real del SO, no hace falta nada de electron/main.js más que
-// el foco de ventana al hacer clic (ver app:focus en preload.cjs).
+import { IS_CAPACITOR } from './supabaseClient.js'
+import { LocalNotifications } from '@capacitor/local-notifications'
 
 let permissionAsked = false
+let activeChatKey = null
+
+export function setActiveChatViewing(key) {
+  activeChatKey = key
+}
+
+export function getActiveChatViewing() {
+  return activeChatKey
+}
 
 async function ensurePermission() {
   if (typeof Notification === 'undefined') return false
   if (Notification.permission === 'granted') return true
   if (Notification.permission === 'denied' || permissionAsked) return false
   permissionAsked = true
-  const result = await Notification.requestPermission()
-  return result === 'granted'
+  try {
+    const result = await Notification.requestPermission()
+    return result === 'granted'
+  } catch {
+    return false
+  }
 }
 
 export function previewForMessage(row) {
@@ -25,15 +36,56 @@ export function previewForMessage(row) {
   return row.content
 }
 
-// no interrumpe si la ventana ya está en foco — ahí ya lo estás viendo
-export async function notifyNewMessage(title, body) {
-  if (!isDesktop || document.hasFocus()) return
-  const granted = await ensurePermission()
-  if (!granted) return
-  const notification = new Notification(title, { body })
-  notification.onclick = () => {
-    window.notionAPI?.focusApp()
-    window.focus()
+// Dispara una notificación nativa del sistema según la plataforma:
+// - Windows Desktop: toast nativo del SO a través de Electron Notification (con ícono y sonido).
+// - Android: notificación nativa de barra de estado a través de LocalNotifications / Push.
+// - Web: HTML5 Notification estándar.
+// Si el usuario tiene la app enfocada y está leyendo ese mismo chat, no se interrumpe.
+export async function notifyNewMessage(title, body, chatKey = null) {
+  if (document.hasFocus() && chatKey && activeChatKey === chatKey) {
+    return
+  }
+
+  // 1. Desktop (Electron IPC al proceso main con Notification nativo de Windows)
+  if (isDesktop && window.notionAPI?.showNotification) {
+    try {
+      await window.notionAPI.showNotification({ title, body })
+      return
+    } catch (err) {
+      console.warn('Error en notificación nativa de Electron:', err)
+    }
+  }
+
+  // 2. Android (Capacitor LocalNotifications con canal de alta prioridad)
+  if (IS_CAPACITOR) {
+    try {
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            title: title || 'FlashLab',
+            body: body || '',
+            id: (Date.now() % 10000000) + Math.floor(Math.random() * 1000),
+            channelId: 'fcm_fallback_notification_channel',
+            smallIcon: 'ic_launcher',
+            sound: 'default',
+          },
+        ],
+      })
+      return
+    } catch (err) {
+      console.warn('Error en notificación nativa de Android:', err)
+    }
+  }
+
+  // 3. Fallback Web Browser estándar
+  if (typeof Notification !== 'undefined') {
+    const granted = await ensurePermission()
+    if (!granted) return
+    const notification = new Notification(title, { body })
+    notification.onclick = () => {
+      window.notionAPI?.focusApp()
+      window.focus()
+    }
   }
 }
 

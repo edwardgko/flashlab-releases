@@ -19,7 +19,7 @@ import {
 } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import http from 'node:http'
 import https from 'node:https'
@@ -3146,6 +3146,25 @@ function createWindow(initialBounds) {
     win.focus()
   })
 
+  // Muestra una notificación nativa del sistema operativo (toast de Windows con ícono y sonido)
+  ipcMain.handle('app:show-notification', (_event, { title, body } = {}) => {
+    if (!Notification.isSupported()) return false
+    const iconPath = path.join(__dirname, '../build/icon.png')
+    const notif = new Notification({
+      title: title || 'FlashLab',
+      body: body || '',
+      icon: existsSync(iconPath) ? iconPath : undefined,
+      silent: false,
+    })
+    notif.on('click', () => {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    })
+    notif.show()
+    return true
+  })
+
   // Windows no tiene un equivalente al setBadge de macOS (texto en el ícono
   // del dock) — el análogo es setOverlayIcon sobre el ícono de la barra de
   // tareas, pero solo acepta una IMAGEN, no un número: el número hay que
@@ -3725,6 +3744,13 @@ app.whenReady().then(async () => {
     }
   })
   const win = createWindow(settings.windowBounds)
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'notifications') {
+      callback(true)
+      return
+    }
+    callback(false)
+  })
   setupAutoUpdater(win)
   warnIfPerMachineInstall(win)
   // en segundo plano, sin bloquear el arranque

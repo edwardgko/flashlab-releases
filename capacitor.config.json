@@ -4,5 +4,14 @@
   "webDir": "dist",
   "android": {
     "allowMixedContent": false
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher",
+      "iconColor": "#488AFF"
+    }
   }
 }

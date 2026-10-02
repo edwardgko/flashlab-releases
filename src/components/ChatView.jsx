@@ -64,6 +64,7 @@ import { driveFileIdFromStored, repairVideoAttachment, resolveDriveDisplayUrl } 
 import { getDriveMediaProxyUrl } from '../lib/webDrive.js'
 import { api, isDesktop } from '../lib/api.js'
 import { cancelUpload, enqueueUpload, getSnapshot as getUploadsSnapshot, subscribe as subscribeUploads } from '../lib/backgroundUploads.js'
+import { setActiveChatViewing } from '../lib/desktopNotify.js'
 
 // menús flotantes (clic derecho, reacciones) se posicionan en el punto
 // exacto del clic — cerca de un borde de la ventana eso los cortaba (ver
@@ -1689,6 +1690,11 @@ export default function ChatView({ insetLeft = false, sidebarOpen = false }) {
   // bajo una clave por chat (la URL ya subida, no la imagen en sí — así no
   // hay que resubirla cada sesión)
   const activeChatKey = activeGroupId ? `group-${activeGroupId}` : activeId ? `dm-${activeId}` : null
+
+  useEffect(() => {
+    setActiveChatViewing(activeChatKey)
+    return () => setActiveChatViewing(null)
+  }, [activeChatKey])
 
   // en localStorage se guarda el ID del archivo en Drive, no una URL: en la
   // web la URL mostrable es un blob temporal que no sobrevive a un reload

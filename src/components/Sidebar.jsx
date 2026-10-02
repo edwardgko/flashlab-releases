@@ -584,11 +584,11 @@ export default function Sidebar({
     // exacto; el Set se resetea solo si crece demasiado, no hace falta que
     // sobreviva más que la sesión de este efecto.
     const notifiedIds = new Set()
-    const notifyOnce = (id, title, body) => {
+    const notifyOnce = (id, title, body, chatKey = null) => {
       if (notifiedIds.has(id)) return
       if (notifiedIds.size > 200) notifiedIds.clear()
       notifiedIds.add(id)
-      notifyNewMessage(title, body)
+      notifyNewMessage(title, body, chatKey)
     }
 
     // el aviso en vivo (postgres_changes INSERT) solo dispara si llega
@@ -601,7 +601,7 @@ export default function Sidebar({
       if (row.created_at > dmSince) dmSince = row.created_at
       listConversationPartners().then((partners) => {
         const email = partners.find((p) => p.id === row.sender_id)?.email ?? 'Alguien'
-        notifyOnce(row.id, email, previewForMessage(row))
+        notifyOnce(row.id, email, previewForMessage(row), `dm-${row.sender_id}`)
       })
     }
     const catchUpDm = () => {
@@ -620,7 +620,7 @@ export default function Sidebar({
         const name = groups.find((g) => g.id === row.conversation_id)?.name ?? 'Grupo'
         listGroupMembers(row.conversation_id).then((members) => {
           const email = members.find((m) => m.user_id === row.sender_id)?.email ?? 'Alguien'
-          notifyOnce(row.id, name, `${email}: ${previewForMessage(row)}`)
+          notifyOnce(row.id, name, `${email}: ${previewForMessage(row)}`, `group-${row.conversation_id}`)
         })
       })
     }
