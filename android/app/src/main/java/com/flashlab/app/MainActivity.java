@@ -6,9 +6,11 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(FlashLabNativePlugin.class);
         super.onCreate(savedInstanceState);
         if (getApplication() instanceof FlashLabApplication) {
             ((FlashLabApplication) getApplication()).createNotificationChannels();
         }
     }
 }
+
