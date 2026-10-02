@@ -1,5 +1,6 @@
 package com.flashlab.app;
 
+import android.app.Activity;
 import android.app.Application;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -9,15 +10,39 @@ import android.media.AudioAttributes;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 
 public class FlashLabApplication extends Application {
     public static final String CHAT_CHANNEL_ID = "flashlab_messages";
     public static final String FALLBACK_CHANNEL_ID = "fcm_fallback_notification_channel";
+    private static int resumedActivityCount = 0;
+
+    public static boolean isAppInForeground() {
+        return resumedActivityCount > 0;
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannels();
+
+        registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityResumed(Activity activity) {
+                resumedActivityCount++;
+            }
+
+            @Override
+            public void onActivityPaused(Activity activity) {
+                resumedActivityCount = Math.max(0, resumedActivityCount - 1);
+            }
+
+            @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
+            @Override public void onActivityStarted(Activity activity) {}
+            @Override public void onActivityStopped(Activity activity) {}
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
+            @Override public void onActivityDestroyed(Activity activity) {}
+        });
     }
 
     public void createNotificationChannels() {

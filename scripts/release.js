@@ -247,9 +247,9 @@ async function ensureAllAssets() {
     console.log('📱 Sincronizando Capacitor con Android...');
     execSync('npx cap sync android', { stdio: 'inherit' });
 
-    console.log('🔨 Compilando APK con Gradle (assembleRelease)...');
+    console.log('🔨 Compilando APK con Gradle (clean assembleRelease)...');
     const javaHome = 'C:\\Users\\edwar\\dev-tools\\jdk21-home';
-    execSync('cmd.exe /c ".\\gradlew.bat assembleRelease"', {
+    execSync('cmd.exe /c ".\\gradlew.bat clean assembleRelease"', {
       cwd: path.resolve('android'),
       stdio: 'inherit',
       env: { ...process.env, JAVA_HOME: javaHome }

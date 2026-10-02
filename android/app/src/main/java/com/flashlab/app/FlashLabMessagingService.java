@@ -72,9 +72,9 @@ public class FlashLabMessagingService extends FirebaseMessagingService {
             return;
         }
 
-        // 4. Si la app está cerrada o en segundo plano, construir y mostrar la notificación nativa
-        PushNotificationsPlugin pushPlugin = PushNotificationsPlugin.getPushNotificationsInstance();
-        boolean isForeground = (pushPlugin != null && pushPlugin.getActivity() != null && !pushPlugin.getActivity().isFinishing());
+        // 4. Si la app NO está en primer plano visible al usuario (minimizada, bloqueada o cerrada),
+        // construir y mostrar la notificación nativa de Android de alta prioridad con sonido y banner
+        boolean isForeground = FlashLabApplication.isAppInForeground();
 
         if (!isForeground) {
             showNativeNotification(title, body, data);
@@ -143,7 +143,7 @@ public class FlashLabMessagingService extends FirebaseMessagingService {
             .setVibrate(new long[]{ 0, 250, 250, 250 })
             .setContentIntent(pendingIntent);
 
-        int notifId = Math.abs((title + ":" + body).hashCode());
+        int notifId = (int) (System.currentTimeMillis() % 10000000);
         notificationManager.notify(notifId, builder.build());
     }
 

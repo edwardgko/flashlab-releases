@@ -1,9 +1,12 @@
 import { PushNotifications } from '@capacitor/push-notifications'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { App as CapacitorApp } from '@capacitor/app'
+import { registerPlugin } from '@capacitor/core'
 import { supabase } from './supabaseClient.js'
 import { notifyNewMessage } from './desktopNotify.js'
 import { sendChatPush } from './chat.js'
+
+const FlashLabNative = registerPlugin('FlashLabNative')
 
 let currentUserId = null
 let currentToken = null
@@ -31,6 +34,11 @@ async function persistToken(token, userId) {
 export async function setupPushNotifications(myId) {
   if (!myId) return
   currentUserId = myId
+
+  // Sincronizar usuario activo con el servicio nativo de Android
+  try {
+    await FlashLabNative.setActiveUser({ userId: myId })
+  } catch {}
 
   // Si ya tenemos token de esta sesión o de Firebase, sincronizarlo para este usuario
   if (currentToken) {
@@ -103,6 +111,11 @@ export async function setupPushNotifications(myId) {
     try {
       const data = notification.data || {}
       const senderId = data.senderId
+      // NUNCA notificar a este dispositivo si el mensaje lo envió el usuario actual
+      if (senderId && currentUserId && senderId === currentUserId) {
+        return
+      }
+
       const conversationId = data.conversationId
       const chatKey = conversationId ? `group-${conversationId}` : (senderId ? `dm-${senderId}` : null)
       const uniqueId = notification.id || data.messageId || `${notification.title}:${notification.body}`
@@ -120,9 +133,12 @@ export async function setupPushNotifications(myId) {
     window.focus()
   })
 
-  // 6. Al volver al primer plano (appStateChange), refrescar registro de push
+  // 6. Al volver al primer plano (appStateChange), refrescar registro de push y usuario activo
   CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
     if (isActive && currentUserId) {
+      try {
+        await FlashLabNative.setActiveUser({ userId: currentUserId })
+      } catch {}
       if (currentToken) {
         persistToken(currentToken, currentUserId)
       }

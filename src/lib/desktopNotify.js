@@ -68,8 +68,11 @@ export async function notifyNewMessage(title, body, chatKey = null, uniqueId = n
     return
   }
 
-  const dedupeKey = uniqueId ? String(uniqueId) : `${title}:${body}`
-  if (isRecentDuplicate(dedupeKey)) {
+  const contentKey = `${title}:${body}`
+  if (isRecentDuplicate(contentKey)) {
+    return
+  }
+  if (uniqueId && isRecentDuplicate(String(uniqueId))) {
     return
   }
 

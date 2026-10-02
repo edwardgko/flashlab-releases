@@ -598,6 +598,7 @@ export default function Sidebar({
     // avisó, para que el catch-up de más abajo sepa qué le falta traer.
     let dmSince = new Date().toISOString()
     const notifyDmRow = (row) => {
+      if (row.sender_id === myId) return
       if (row.created_at > dmSince) dmSince = row.created_at
       listConversationPartners().then((partners) => {
         const email = partners.find((p) => p.id === row.sender_id)?.email ?? 'Alguien'
@@ -615,6 +616,7 @@ export default function Sidebar({
 
     let groupSince = new Date().toISOString()
     const notifyGroupRow = (row) => {
+      if (row.sender_id === myId) return
       if (row.created_at > groupSince) groupSince = row.created_at
       listMyGroups().then((groups) => {
         const name = groups.find((g) => g.id === row.conversation_id)?.name ?? 'Grupo'
