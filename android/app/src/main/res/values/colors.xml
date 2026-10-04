@@ -4,4 +4,5 @@
          oscuro en values-night/colors.xml, mismo #111111 que ya usaba el
          splash.png viejo para modo noche. -->
     <color name="splashBackground">#FFFFFF</color>
+    <color name="notification_color">#2563EB</color>
 </resources>
