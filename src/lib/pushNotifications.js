@@ -46,12 +46,13 @@ export async function setupPushNotifications(myId) {
   }
 
   // 1. Permisos de Push (Android 13+ exige POST_NOTIFICATIONS en runtime)
-  let permStatus = await PushNotifications.checkPermissions()
-  if (permStatus.receive !== 'granted') {
-    permStatus = await PushNotifications.requestPermissions()
-  }
-  if (permStatus.receive !== 'granted') {
-    return
+  try {
+    let permStatus = await PushNotifications.checkPermissions()
+    if (permStatus.receive !== 'granted') {
+      permStatus = await PushNotifications.requestPermissions()
+    }
+  } catch (err) {
+    console.warn('Error verificando permisos de Push:', err)
   }
 
   // 2. Permisos de Notificaciones Locales (para avisos en primer plano)
@@ -67,7 +68,7 @@ export async function setupPushNotifications(myId) {
   // 3. Crear canales de notificación en Android 8+ (Oreo+)
   // importance: 5 = IMPORTANCE_HIGH (muestra banner flotante 'heads-up' y suena)
   const channelConfig = {
-    id: 'flashlab_messages',
+    id: 'flashlab_messages_v2',
     name: 'Mensajes de chat',
     description: 'Notificaciones de mensajes de FlashLab',
     importance: 5,
@@ -79,8 +80,10 @@ export async function setupPushNotifications(myId) {
 
   try {
     await PushNotifications.createChannel(channelConfig)
+    await PushNotifications.createChannel({ ...channelConfig, id: 'flashlab_messages' })
     await PushNotifications.createChannel({ ...channelConfig, id: 'fcm_fallback_notification_channel' })
     await LocalNotifications.createChannel(channelConfig)
+    await LocalNotifications.createChannel({ ...channelConfig, id: 'flashlab_messages' })
     await LocalNotifications.createChannel({ ...channelConfig, id: 'fcm_fallback_notification_channel' })
   } catch (err) {
     console.warn('Error configurando canales de notificación:', err)

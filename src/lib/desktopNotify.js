@@ -99,15 +99,15 @@ export async function notifyNewMessage(title, body, chatKey = null, uniqueId = n
     // Si la app está en primer plano (visible pero en otra sección),
     // mostramos la notificación local con sonido y heads-up banner.
     try {
-      const notifId = (hashString(dedupeKey) % 10000000) + 1
+      const notifId = (hashString(contentKey) % 10000000) + 1
       await LocalNotifications.schedule({
         notifications: [
           {
             title: title || 'FlashLab',
             body: body || '',
             id: notifId,
-            channelId: 'flashlab_messages',
-            smallIcon: 'ic_launcher',
+            channelId: 'flashlab_messages_v2',
+            smallIcon: 'ic_stat_notification',
             sound: 'default',
           },
         ],

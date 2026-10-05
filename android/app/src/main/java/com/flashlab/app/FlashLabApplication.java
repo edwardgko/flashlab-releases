@@ -13,7 +13,8 @@ import android.os.Build;
 import android.os.Bundle;
 
 public class FlashLabApplication extends Application {
-    public static final String CHAT_CHANNEL_ID = "flashlab_messages";
+    public static final String CHAT_CHANNEL_ID = "flashlab_messages_v2";
+    public static final String LEGACY_CHANNEL_ID = "flashlab_messages";
     public static final String FALLBACK_CHANNEL_ID = "fcm_fallback_notification_channel";
     private static int resumedActivityCount = 0;
 
@@ -56,23 +57,39 @@ public class FlashLabApplication extends Application {
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
                 .build();
 
-            // 1. Canal principal para mensajes de chat (alta importancia para heads-up banner y sonido)
-            NotificationChannel chatChannel = new NotificationChannel(
+            // 1. Canal principal v2 para mensajes de chat (alta importancia para heads-up banner y sonido)
+            NotificationChannel chatChannelV2 = new NotificationChannel(
                 CHAT_CHANNEL_ID,
                 "Mensajes de chat",
                 NotificationManager.IMPORTANCE_HIGH
             );
-            chatChannel.setDescription("Notificaciones de mensajes y menciones de FlashLab");
-            chatChannel.enableLights(true);
-            chatChannel.setLightColor(Color.BLUE);
-            chatChannel.enableVibration(true);
-            chatChannel.setVibrationPattern(new long[]{ 0, 250, 250, 250 });
-            chatChannel.setSound(defaultSoundUri, audioAttributes);
-            chatChannel.setShowBadge(true);
-            chatChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            manager.createNotificationChannel(chatChannel);
+            chatChannelV2.setDescription("Notificaciones de mensajes y menciones de FlashLab");
+            chatChannelV2.enableLights(true);
+            chatChannelV2.setLightColor(Color.BLUE);
+            chatChannelV2.enableVibration(true);
+            chatChannelV2.setVibrationPattern(new long[]{ 0, 250, 250, 250 });
+            chatChannelV2.setSound(defaultSoundUri, audioAttributes);
+            chatChannelV2.setShowBadge(true);
+            chatChannelV2.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            manager.createNotificationChannel(chatChannelV2);
 
-            // 2. Canal fallback para FCM
+            // 2. Canal legacy
+            NotificationChannel chatChannelLegacy = new NotificationChannel(
+                LEGACY_CHANNEL_ID,
+                "Mensajes de chat (antiguo)",
+                NotificationManager.IMPORTANCE_HIGH
+            );
+            chatChannelLegacy.setDescription("Notificaciones de mensajes de FlashLab");
+            chatChannelLegacy.enableLights(true);
+            chatChannelLegacy.setLightColor(Color.BLUE);
+            chatChannelLegacy.enableVibration(true);
+            chatChannelLegacy.setVibrationPattern(new long[]{ 0, 250, 250, 250 });
+            chatChannelLegacy.setSound(defaultSoundUri, audioAttributes);
+            chatChannelLegacy.setShowBadge(true);
+            chatChannelLegacy.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            manager.createNotificationChannel(chatChannelLegacy);
+
+            // 3. Canal fallback para FCM
             NotificationChannel fallbackChannel = new NotificationChannel(
                 FALLBACK_CHANNEL_ID,
                 "Notificaciones generales",
