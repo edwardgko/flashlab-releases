@@ -7,11 +7,11 @@
   },
   "plugins": {
     "PushNotifications": {
-      "presentationOptions": []
+      "presentationOptions": ["badge", "sound", "alert"]
     },
     "LocalNotifications": {
-      "smallIcon": "ic_launcher",
-      "iconColor": "#488AFF"
+      "smallIcon": "ic_stat_notification",
+      "iconColor": "#2563EB"
     }
   }
 }

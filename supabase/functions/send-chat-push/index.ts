@@ -205,14 +205,14 @@ Deno.serve(async (req) => {
             android: {
               priority: 'HIGH',
               notification: {
-                channel_id: 'flashlab_messages',
+                channel_id: 'flashlab_messages_v2',
                 sound: 'default',
                 default_sound: true,
                 default_vibrate_timings: true,
                 default_light_settings: true,
                 notification_priority: 'PRIORITY_MAX',
                 visibility: 'PUBLIC',
-                icon: 'ic_launcher',
+                icon: 'ic_stat_notification',
               },
             },
           },

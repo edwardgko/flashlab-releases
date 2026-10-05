@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:name=".FlashLabApplication"
         android:allowBackup="true"
@@ -46,6 +47,11 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/notification_color" />
+        <!-- Desactivar el MessagingService por defecto de Capacitor para asegurar que FlashLabMessagingService reciba todos los mensajes -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+
         <service
             android:name=".FlashLabMessagingService"
             android:exported="false">
@@ -61,6 +67,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Android 13+ (targetSdk 36) exige este permiso declarado para que
          PushNotifications.requestPermissions() del plugin pueda pedirlo en
          runtime — sin esto la notificación nunca se muestra, sin error. -->
