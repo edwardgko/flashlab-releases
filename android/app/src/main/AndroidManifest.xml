@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:name=".FlashLabApplication"
         android:allowBackup="true"
@@ -47,11 +46,6 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
             android:resource="@color/notification_color" />
-        <!-- Desactivar el MessagingService por defecto de Capacitor para asegurar que FlashLabMessagingService reciba todos los mensajes -->
-        <service
-            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
-            tools:node="remove" />
-
         <service
             android:name=".FlashLabMessagingService"
             android:exported="false">
