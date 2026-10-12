@@ -3744,12 +3744,22 @@ app.whenReady().then(async () => {
     }
   })
   const win = createWindow(settings.windowBounds)
+  // sin handler Electron concede TODO; con handler, lo que no esté acá se
+  // niega. 'media' cubre getUserMedia (micrófono: notas de voz del chat,
+  // mic de la grabación) Y getDisplayMedia (grabar pantalla) — v0.1.80 dejó
+  // solo 'notifications' y eso rompió la grabación en silencio: el
+  // NotAllowedError resultante es el mismo que "el usuario canceló", así que
+  // screenRecording.js no mostraba ningún error.
+  const ALLOWED_PERMISSIONS = new Set([
+    'notifications',
+    'media',
+    'display-capture',
+    'fullscreen',
+    'clipboard-read',
+    'clipboard-sanitized-write',
+  ])
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'notifications') {
-      callback(true)
-      return
-    }
-    callback(false)
+    callback(ALLOWED_PERMISSIONS.has(permission))
   })
   setupAutoUpdater(win)
   warnIfPerMachineInstall(win)
