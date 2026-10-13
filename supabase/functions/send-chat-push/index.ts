@@ -240,8 +240,12 @@ async function notifyChat(
       .eq('id', conversationId)
       .maybeSingle()
     // foto del grupo: su imagen si tiene una; si el ícono es un emoji, lo
-    // dibuja la app; sin ícono, la app usa el logo de FlashLab
+    // dibuja la app. Sin ícono va 👥 (el mismo que muestra la app para grupos
+    // sin ícono, ver ConversationAvatar en ChatView.jsx) y NO el logo de
+    // FlashLab: ese ya sale de insignia en la notificación y quedaba repetido.
+    // El emoji viaja siempre: es también el respaldo si la imagen no baja.
     const icon = (conversation?.icon ?? '') as string
+    const emojiIcon = icon && !icon.includes('://') && !icon.startsWith('data:') ? icon : ''
     return pushToUsers(admin, recipientIds, {
       title: conversation?.name || 'Grupo',
       body: preview,
@@ -251,7 +255,7 @@ async function notifyChat(
       conversationId,
       isGroup: '1',
       avatarUrl: icon.startsWith('https://') ? icon : '',
-      avatarEmoji: icon && !icon.includes('://') && !icon.startsWith('data:') ? icon : '',
+      avatarEmoji: emojiIcon || '👥',
     })
   }
 
