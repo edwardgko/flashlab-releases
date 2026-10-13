@@ -47,7 +47,14 @@ const isDev = !app.isPackaged
 // proceso), el Centro de actividades de Windows puede simplemente no
 // mostrar el toast — el código del renderer nunca ve un error, la
 // notificación "se crea" pero no aparece en pantalla.
-if (process.platform === 'win32') app.setAppUserModelId('com.flashlab.app')
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.flashlab.app')
+  // CLSID del activador COM de los toasts: sin fijarlo, Electron genera uno
+  // al azar en CADA arranque, y un toast que quedó en el Centro de
+  // actividades de una sesión anterior ya no le llega a nadie al clickearlo
+  // o responderlo (ver Notification.handleActivation en createWindow).
+  app.setToastActivatorCLSID('{341CF334-8931-491A-8F9A-8BC43D308BEC}')
+}
 // ffmpeg-static no puede ejecutarse desde dentro del .asar empaquetado
 // (asarUnpack en package.json lo extrae a app.asar.unpacked/ en build)
 const ffmpegPath = app.isPackaged ? ffmpegPathRaw.replace('app.asar', 'app.asar.unpacked') : ffmpegPathRaw
@@ -3097,6 +3104,65 @@ function createTray(win) {
   tray.on('click', showWindow)
 }
 
+function escapeXml(text) {
+  return String(text).replace(
+    /[<>&'"]/g,
+    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]
+  )
+}
+
+// el toast de Windows solo acepta imágenes como archivo local (una app sin
+// empaquetar MSIX no puede usar URLs http ni data:), así que el avatar que
+// dibuja el renderer (ver avatarDataUrl en desktopNotify.js) se baja a temp.
+// Nombre = hash del contenido: el mismo avatar se escribe una sola vez.
+async function saveNotificationAvatar(dataUrl) {
+  const prefix = 'data:image/png;base64,'
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith(prefix)) return null
+  try {
+    const dir = path.join(app.getPath('temp'), 'flashlab-notif')
+    const file = path.join(dir, `${createHash('sha1').update(dataUrl).digest('hex')}.png`)
+    if (!existsSync(file)) {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(file, Buffer.from(dataUrl.slice(prefix.length), 'base64'))
+    }
+    return file
+  } catch (err) {
+    console.error('no se pudo guardar el avatar de la notificación:', err)
+    return null
+  }
+}
+
+// toastXml propio en vez de las opciones de Electron porque con esas no hay
+// forma de recortar el avatar en círculo (sale cuadrado, hint-crop="none") ni
+// de cambiar el botón de respuesta ("Reply" fijo, en inglés). Los `arguments`
+// copian el formato que arma el propio Electron para hasReply
+// (type=reply&tag=<id>, sacado del payload real que guarda Windows en
+// wpndatabase.db) — así Electron los reconoce como 'reply'/'click' — más el
+// chatKey, que es lo que lee Notification.handleActivation.
+function buildChatToastXml({ id, chatKey, title, body, imagePath }) {
+  const args = (type) =>
+    escapeXml(`type=${type}&tag=${id}${chatKey ? `&chatKey=${encodeURIComponent(chatKey)}` : ''}`)
+  const image = imagePath
+    ? `<image placement="appLogoOverride" hint-crop="circle" src="${escapeXml(imagePath)}"/>`
+    : ''
+  const actions = chatKey
+    ? `<actions>
+    <input id="reply" type="text" placeHolderContent="Escribe tu respuesta"/>
+    <action content="Enviar" arguments="${args('reply')}" activationType="foreground" hint-inputId="reply"/>
+  </actions>`
+    : ''
+  return `<toast launch="${args('click')}" activationType="foreground">
+  <visual>
+    <binding template="ToastGeneric">
+      <text hint-maxLines="1">${escapeXml(title)}</text>
+      <text>${escapeXml(body)}</text>
+      ${image}
+    </binding>
+  </visual>
+  ${actions}
+</toast>`
+}
+
 function createWindow(initialBounds) {
   const bounds = clampBoundsToDisplay(initialBounds) ?? { width: 1280, height: 820 }
   const win = new BrowserWindow({
@@ -3146,16 +3212,34 @@ function createWindow(initialBounds) {
     win.focus()
   })
 
-  // Muestra una notificación nativa del sistema operativo (toast de Windows con ícono y sonido)
-  ipcMain.handle('app:show-notification', (_event, { title, body } = {}) => {
+  // Muestra una notificación nativa del sistema operativo (toast de Windows con ícono y sonido).
+  // En Windows, con chatKey, el toast imita al de WhatsApp: avatar circular,
+  // nombre, texto y respuesta rápida ("Escribe tu respuesta" + "Enviar").
+  ipcMain.handle('app:show-notification', async (_event, { title, body, chatKey, avatar } = {}) => {
     if (!Notification.isSupported()) return false
     const iconPath = path.join(__dirname, '../build/icon.png')
-    const notif = new Notification({
+    const options = {
       title: title || 'FlashLab',
       body: body || '',
       icon: existsSync(iconPath) ? iconPath : undefined,
       silent: false,
-    })
+    }
+    if (process.platform === 'win32') {
+      // clic/respuesta los atiende Notification.handleActivation (acá abajo),
+      // no eventos de esta instancia: esos se pierden si el objeto ya fue
+      // recolectado, o si el toast se usa desde el Centro de actividades
+      options.id = randomUUID()
+      options.toastXml = buildChatToastXml({
+        id: options.id,
+        chatKey,
+        title: options.title,
+        body: options.body,
+        imagePath: (await saveNotificationAvatar(avatar)) ?? options.icon,
+      })
+      new Notification(options).show()
+      return true
+    }
+    const notif = new Notification(options)
     notif.on('click', () => {
       if (win.isMinimized()) win.restore()
       win.show()
@@ -3164,6 +3248,38 @@ function createWindow(initialBounds) {
     notif.show()
     return true
   })
+
+  // toda activación de un toast (clic, "Enviar"), viva o no la instancia de
+  // Notification. El chatKey viaja dentro de `arguments` (ver
+  // buildChatToastXml), así que esto no depende de ningún estado en memoria.
+  if (process.platform === 'win32') {
+    // Electron llega a este callback por dos caminos (el evento Activated del
+    // toast Y el activador COM — windows_toast_notification.cc no deduplica),
+    // así que el mismo clic/"Enviar" podría venir dos veces: mandar la
+    // respuesta duplicada. Cada toast tiene su tag único en `arguments`.
+    const handledActivations = new Set()
+    Notification.handleActivation((details) => {
+      const activationKey = `${details.arguments}|${details.reply ?? ''}`
+      if (handledActivations.has(activationKey)) return
+      handledActivations.add(activationKey)
+      setTimeout(() => handledActivations.delete(activationKey), 60_000)
+      const chatKey = new URLSearchParams(details.arguments || '').get('chatKey')
+      const text = (details.reply ?? details.userInputs?.reply ?? '').trim()
+      const deliver = () => {
+        if (details.type === 'reply') {
+          if (chatKey && text) win.webContents.send('notification:reply', { chatKey, text })
+          return
+        }
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+        if (chatKey) win.webContents.send('notification:open-chat', { chatKey })
+      }
+      // arranque en frío desde el toast: el renderer todavía no escucha
+      if (win.webContents.isLoading()) win.webContents.once('did-finish-load', deliver)
+      else deliver()
+    })
+  }
 
   // Windows no tiene un equivalente al setBadge de macOS (texto en el ícono
   // del dock) — el análogo es setOverlayIcon sobre el ícono de la barra de

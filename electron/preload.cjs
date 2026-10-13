@@ -119,4 +119,6 @@ contextBridge.exposeInMainWorld('notionAPI', {
   installUpdate: () => ipcRenderer.invoke('update:install'),
   setUnreadBadge: (dataUrl, count) => ipcRenderer.invoke('app:set-unread-badge', dataUrl, count),
   showNotification: (opts) => ipcRenderer.invoke('app:show-notification', opts),
+  onNotificationReply: (callback) => onEvent('notification:reply', callback),
+  onNotificationOpenChat: (callback) => onEvent('notification:open-chat', callback),
 })

@@ -57,6 +57,43 @@ function hashString(str) {
   return Math.abs(hash)
 }
 
+// avatar del toast de Windows (estilo WhatsApp): no hay fotos de perfil, así
+// que es la misma inicial que muestra el chat, sobre un color fijo por
+// nombre. Se dibuja cuadrado — Windows lo recorta en círculo (hint-crop, ver
+// buildChatToastXml en electron/main.js). 192px = nítido hasta escala 200%.
+const AVATAR_COLORS = ['#2563eb', '#16a34a', '#db2777', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#dc2626']
+function avatarDataUrl(name) {
+  const size = 192
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = AVATAR_COLORS[hashString(name || '?') % AVATAR_COLORS.length]
+  ctx.fillRect(0, 0, size, size)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = '600 92px "Segoe UI", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText((name || '?').trim().charAt(0).toUpperCase() || '?', size / 2, size / 2 + 4)
+  return canvas.toDataURL('image/png')
+}
+
+// clic en un toast de chat -> abrir ESA conversación. App.jsx cambia a la
+// pestaña de chat y ChatView (que puede no estar montado todavía) la toma
+// de acá al montarse, o del evento si ya estaba abierto.
+let pendingChatKey = null
+
+export function requestOpenChat(chatKey) {
+  pendingChatKey = chatKey
+  window.dispatchEvent(new CustomEvent('flashlab:open-chat', { detail: { chatKey } }))
+}
+
+export function consumePendingChat() {
+  const chatKey = pendingChatKey
+  pendingChatKey = null
+  return chatKey
+}
+
 // Dispara una notificación nativa del sistema según la plataforma:
 // - Windows Desktop: toast nativo del SO a través de Electron Notification (con ícono y sonido).
 // - Android: si la app está en segundo plano o cerrada, FCM se encarga directamente vía Android OS;
@@ -79,7 +116,12 @@ export async function notifyNewMessage(title, body, chatKey = null, uniqueId = n
   // 1. Desktop (Electron IPC al proceso main con Notification nativo de Windows)
   if (isDesktop && window.notionAPI?.showNotification) {
     try {
-      await window.notionAPI.showNotification({ title, body })
+      await window.notionAPI.showNotification({
+        title,
+        body,
+        chatKey,
+        avatar: chatKey ? avatarDataUrl(title) : undefined,
+      })
       return
     } catch (err) {
       console.warn('Error en notificación nativa de Electron:', err)

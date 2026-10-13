@@ -64,7 +64,7 @@ import { driveFileIdFromStored, repairVideoAttachment, resolveDriveDisplayUrl } 
 import { getDriveMediaProxyUrl } from '../lib/webDrive.js'
 import { api, isDesktop } from '../lib/api.js'
 import { cancelUpload, enqueueUpload, getSnapshot as getUploadsSnapshot, subscribe as subscribeUploads } from '../lib/backgroundUploads.js'
-import { setActiveChatViewing } from '../lib/desktopNotify.js'
+import { consumePendingChat, setActiveChatViewing } from '../lib/desktopNotify.js'
 
 // menús flotantes (clic derecho, reacciones) se posicionan en el punto
 // exacto del clic — cerca de un borde de la ventana eso los cortaba (ver
@@ -2058,6 +2058,19 @@ export default function ChatView({ insetLeft = false, sidebarOpen = false }) {
     setActiveId(null)
     setActiveGroupId(null)
   }
+
+  // abrir la conversación de un toast clickeado (ver requestOpenChat): la
+  // pendiente al montar, o la del evento si este ChatView ya estaba abierto
+  useEffect(() => {
+    const open = (chatKey) => {
+      if (chatKey?.startsWith('dm-')) selectDm(chatKey.slice(3))
+      else if (chatKey?.startsWith('group-')) selectGroup(chatKey.slice(6))
+    }
+    open(consumePendingChat())
+    const onOpenChat = () => open(consumePendingChat())
+    window.addEventListener('flashlab:open-chat', onOpenChat)
+    return () => window.removeEventListener('flashlab:open-chat', onOpenChat)
+  }, [])
 
   // Esc cierra la conversación abierta — si el input tiene texto, la primera
   // Esc solo lo vacía (y recién la segunda cierra, ya con el input vacío);

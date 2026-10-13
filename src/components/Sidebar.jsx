@@ -3,12 +3,21 @@ import { Browser } from '@capacitor/browser'
 import { isImageIcon } from '../lib/icon.js'
 import { api, isDesktop } from '../lib/api.js'
 import { supabase, useAuthSession, IS_CAPACITOR } from '../lib/supabaseClient.js'
-import { getUnreadCounts, listConversationPartners, listIncomingSince, subscribeToInbox } from '../lib/chat.js'
+import {
+  getUnreadCounts,
+  listConversationPartners,
+  listIncomingSince,
+  markConversationRead,
+  sendMessage,
+  subscribeToInbox,
+} from '../lib/chat.js'
 import {
   getGroupUnreadCounts,
   listGroupIncomingSince,
   listGroupMembers,
   listMyGroups,
+  markGroupRead,
+  sendGroupMessage,
   subscribeToAnyGroupMessage,
 } from '../lib/groupChat.js'
 import { notifyNewMessage, previewForMessage, updateTaskbarBadge } from '../lib/desktopNotify.js'
@@ -676,7 +685,28 @@ export default function Sidebar({
     document.addEventListener('visibilitychange', onVisible)
 
     window.addEventListener('flashlab:chat-read', refresh)
+
+    // respuesta rápida desde el toast de Windows ("Enviar", ver
+    // buildChatToastXml en electron/main.js): igual que en WhatsApp, responder
+    // también marca la conversación como leída.
+    const offNotificationReply = window.notionAPI?.onNotificationReply?.(async ({ chatKey, text }) => {
+      try {
+        if (chatKey.startsWith('dm-')) {
+          const otherId = chatKey.slice(3)
+          await sendMessage(otherId, text)
+          await markConversationRead(otherId)
+        } else if (chatKey.startsWith('group-')) {
+          const conversationId = chatKey.slice(6)
+          await sendGroupMessage(conversationId, text)
+          await markGroupRead(conversationId)
+        }
+        refresh()
+      } catch (err) {
+        console.error('no se pudo mandar la respuesta desde la notificación:', err)
+      }
+    })
     return () => {
+      offNotificationReply?.()
       cancelled = true
       clearInterval(interval)
       window.removeEventListener('focus', catchUpAll)

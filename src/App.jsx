@@ -3,6 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app'
 import { api } from './lib/api.js'
 import { useAuthSession, IS_CAPACITOR } from './lib/supabaseClient.js'
 import { setupPushNotifications } from './lib/pushNotifications.js'
+import { requestOpenChat } from './lib/desktopNotify.js'
 import Sidebar from './components/Sidebar.jsx'
 import { isMobileNow, useIsMobile } from './lib/useIsMobile.js'
 import { emitReloadContent } from './lib/liveSync.js'
@@ -11,6 +12,7 @@ import QuickSwitcher from './components/QuickSwitcher.jsx'
 import HomeView from './components/HomeView.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import TabBar from './components/TabBar.jsx'
+import NotificationsBanner from './components/NotificationsBanner.jsx'
 
 // vistas secundarias en carga diferida — no todas las sesiones abren Chat,
 // Calendario o Grabaciones, y antes iban igual en el bundle inicial (junto
@@ -232,6 +234,17 @@ export default function App({ theme, setTheme }) {
       api.setLastOpened(id)
       setLastOpenedId(id)
     },
+    [patchActiveTab]
+  )
+
+  // clic en el toast de un mensaje (Windows) -> pestaña de chat con esa
+  // conversación abierta (ChatView la toma de requestOpenChat)
+  useEffect(
+    () =>
+      window.notionAPI?.onNotificationOpenChat?.(({ chatKey }) => {
+        patchActiveTab({ kind: 'chat' })
+        requestOpenChat(chatKey)
+      }),
     [patchActiveTab]
   )
 
@@ -675,6 +688,7 @@ export default function App({ theme, setTheme }) {
         onNewTab={openNewTab}
         isMobile={isMobile}
       />
+      {IS_CAPACITOR && <NotificationsBanner />}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* antes el backdrop oscuro solo aparecía en mobile — en desktop el
         sidebar era un panel DOCKED (relative shrink-0, empujaba <main> en

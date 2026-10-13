@@ -86,6 +86,92 @@ async function getFcmAccessToken(serviceAccount: { client_email: string; private
   return tokenData.access_token as string
 }
 
+type PushResult = { status: number; error?: string }
+
+// manda el push a todos los dispositivos registrados de esos usuarios y
+// devuelve el resultado de FCM POR TOKEN. Antes cualquier rechazo de FCM que
+// no fuera UNREGISTERED/NOT_FOUND se tragaba en silencio y la función
+// respondía 200 igual — no había forma de saber si Google había aceptado el
+// mensaje o no (así quedó sin diagnosticar "en Android no llega nada").
+async function pushToUsers(
+  admin: ReturnType<typeof createClient>,
+  userIds: string[],
+  title: string,
+  body: string,
+  data: Record<string, string>
+) {
+  const { data: tokens, error: tokensError } = await admin
+    .from('push_tokens')
+    .select('token')
+    .in('user_id', userIds)
+  if (tokensError) return json({ error: tokensError.message }, 500)
+  if (!tokens?.length) return json({ sent: 0, reason: 'sin dispositivos registrados' })
+
+  const saJson = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+  if (!saJson) return json({ error: 'FIREBASE_SERVICE_ACCOUNT_JSON no configurada' }, 500)
+  const serviceAccount = JSON.parse(saJson)
+
+  let accessToken: string
+  try {
+    accessToken = await getFcmAccessToken(serviceAccount)
+  } catch (err) {
+    return json({ error: `token de Google: ${err instanceof Error ? err.message : String(err)}` }, 502)
+  }
+
+  const fcmUrl = `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`
+
+  const staleTokens: string[] = []
+  const results: PushResult[] = await Promise.all(
+    tokens.map(async ({ token }): Promise<PushResult> => {
+      const res = await fetch(fcmUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            token,
+            // con `notification`, si la app está en segundo plano o cerrada
+            // es el propio SDK de Firebase el que dibuja la notificación (no
+            // hace falta que corra código nuestro); en primer plano llega a
+            // FlashLabMessagingService.onMessageReceived con `data`.
+            notification: { title, body },
+            data: { title, body, ...data },
+            android: {
+              priority: 'HIGH',
+              notification: {
+                // mismo canal e ícono que crea/usa la app nativa
+                // (FlashLabApplication.CHAT_CHANNEL_ID, res/drawable) — el
+                // ícono de la barra de estado tiene que ser monocromo:
+                // ic_launcher (a todo color) sale como un cuadrado blanco.
+                channel_id: 'flashlab_messages_v2',
+                icon: 'ic_stat_notification',
+                color: '#2563EB',
+                sound: 'default',
+                default_vibrate_timings: true,
+                notification_priority: 'PRIORITY_HIGH',
+                visibility: 'PUBLIC',
+              },
+            },
+          },
+        }),
+      })
+      if (res.ok) return { status: res.status }
+      const errData = await res.json().catch(() => null)
+      const status = errData?.error?.status
+      console.error('FCM rechazó el push:', res.status, JSON.stringify(errData))
+      // token de un dispositivo desinstalado/deslogueado hace rato — FCM
+      // avisa así, es el momento de limpiarlo (si no, cada mensaje futuro
+      // vuelve a pegarle a un token muerto para siempre).
+      if (status === 'UNREGISTERED' || status === 'NOT_FOUND') staleTokens.push(token)
+      return { status: res.status, error: `${status ?? ''} ${errData?.error?.message ?? ''}`.trim() }
+    })
+  )
+
+  if (staleTokens.length) await admin.from('push_tokens').delete().in('token', staleTokens)
+
+  const sent = results.filter((r) => r.status === 200).length
+  return json({ sent, total: tokens.length, results })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
@@ -94,6 +180,16 @@ Deno.serve(async (req) => {
   if (!jwt) return json({ error: 'falta el header Authorization' }, 401)
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+
+  // push de prueba a un usuario, SOLO con la service_role key (o sea, solo
+  // el dueño del proyecto) — para verificar FCM -> dispositivo sin depender
+  // de que otra cuenta mande un mensaje de chat de verdad.
+  if (jwt === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) {
+    const testBody = await req.json().catch(() => null)
+    if (testBody?.action !== 'test_push' || !testBody?.userId) return json({ error: 'faltan parámetros' }, 400)
+    return pushToUsers(admin, [testBody.userId], 'FlashLab', testBody.preview || 'Notificación de prueba', {})
+  }
+
   const { data: userData, error: userError } = await admin.auth.getUser(jwt)
   if (userError || !userData?.user) return json({ error: 'sesión inválida' }, 401)
 
@@ -165,73 +261,8 @@ Deno.serve(async (req) => {
 
   if (!recipientIds.length) return json({ sent: 0, reason: 'sin destinatarios' })
 
-  const { data: tokens, error: tokensError } = await admin
-    .from('push_tokens')
-    .select('token')
-    .in('user_id', recipientIds)
-  if (tokensError) return json({ error: tokensError.message }, 500)
-  if (!tokens?.length) return json({ sent: 0, reason: 'sin dispositivos registrados' })
-
-  const saJson = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')
-  if (!saJson) return json({ error: 'FIREBASE_SERVICE_ACCOUNT_JSON no configurada' }, 500)
-  const serviceAccount = JSON.parse(saJson)
-
-  let accessToken: string
-  try {
-    accessToken = await getFcmAccessToken(serviceAccount)
-  } catch (err) {
-    return json({ error: `token de Google: ${err instanceof Error ? err.message : String(err)}` }, 502)
-  }
-
-  const fcmUrl = `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`
-
-  const staleTokens: string[] = []
-  let sent = 0
-  await Promise.all(
-    tokens.map(async ({ token }) => {
-      const res = await fetch(fcmUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: { title, body: preview },
-            data: {
-              title,
-              body: preview,
-              senderId: userData.user.id,
-              ...(conversationId ? { conversationId } : {}),
-            },
-            android: {
-              priority: 'HIGH',
-              notification: {
-                channel_id: 'flashlab_messages',
-                sound: 'default',
-                default_sound: true,
-                default_vibrate_timings: true,
-                default_light_settings: true,
-                notification_priority: 'PRIORITY_MAX',
-                visibility: 'PUBLIC',
-                icon: 'ic_launcher',
-              },
-            },
-          },
-        }),
-      })
-      if (res.ok) {
-        sent++
-        return
-      }
-      const errData = await res.json().catch(() => null)
-      // token de un dispositivo desinstalado/deslogueado hace rato — FCM
-      // avisa así, es el momento de limpiarlo (si no, cada mensaje futuro
-      // vuelve a pegarle a un token muerto para siempre).
-      const status = errData?.error?.status
-      if (status === 'UNREGISTERED' || status === 'NOT_FOUND') staleTokens.push(token)
-    })
-  )
-
-  if (staleTokens.length) await admin.from('push_tokens').delete().in('token', staleTokens)
-
-  return json({ sent, total: tokens.length })
+  return pushToUsers(admin, recipientIds, title, preview, {
+    senderId: userData.user.id,
+    ...(conversationId ? { conversationId } : {}),
+  })
 })

@@ -31,6 +31,19 @@ async function persistToken(token, userId) {
   }
 }
 
+// ver NotificationsBanner.jsx — null si no se pudo consultar (no es Android)
+export async function getNotificationStatus() {
+  try {
+    return await FlashLabNative.getNotificationStatus()
+  } catch {
+    return null
+  }
+}
+
+export function openNotificationSettings() {
+  return FlashLabNative.openNotificationSettings().catch(() => {})
+}
+
 export async function setupPushNotifications(myId) {
   if (!myId) return
   currentUserId = myId
