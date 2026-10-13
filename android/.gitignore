@@ -99,3 +99,12 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# Firma del APK de release: contraseñas del keystore. NUNCA versionar — este
+# repo es el público edwardgko/flashlab-releases (estuvo publicado hasta
+# 2026-10-13; las contraseñas se cambiaron ese día). Plantilla en
+# keystore.properties.example.
+keystore.properties
+keystore.properties.bak*
+*.keystore
+*.jks
