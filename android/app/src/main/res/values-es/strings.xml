@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="notification_reply">Responder</string>
+    <string name="notification_reply_hint">Mensaje</string>
+    <string name="notification_mark_read">Marcar como leído</string>
+    <string name="notification_mute">Silenciar</string>
+    <string name="notification_you">Tú</string>
+    <string name="notification_reply_failed">No se pudo enviar la respuesta</string>
+</resources>

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -15,11 +16,60 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 @CapacitorPlugin(name = "FlashLabNative")
 public class FlashLabNativePlugin extends Plugin {
+    // chat de la notificación que se tocó (MainActivity lo deja acá; la web lo
+    // consume con consumeLaunchChat al arrancar o al volver a primer plano)
+    private static volatile String launchChatKey = null;
+
+    static void captureLaunchChat(Intent intent) {
+        if (intent == null) return;
+        String chatKey = intent.getStringExtra(ChatNotifications.EXTRA_CHAT_KEY);
+        if (chatKey != null && !chatKey.isEmpty()) {
+            launchChatKey = chatKey;
+            intent.removeExtra(ChatNotifications.EXTRA_CHAT_KEY);
+        }
+    }
+
     @PluginMethod
     public void setActiveUser(PluginCall call) {
         String userId = call.getString("userId");
         FlashLabMessagingService.setActiveUserId(getContext(), userId);
+        // para Responder / Marcar como leído con la app cerrada (ver
+        // ChatNotifications.postAction) — son la URL y la publishable key
+        // pública del proyecto, las mismas que ya viajan en la app web
+        ChatNotifications.setBackend(getContext(), call.getString("supabaseUrl"), call.getString("supabaseKey"));
         call.resolve();
+    }
+
+    @PluginMethod
+    public void setViewingChat(PluginCall call) {
+        ChatNotifications.setViewingChat(getContext(), call.getString("chatKey"));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getMutedChats(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("chatKeys", new JSArray(ChatNotifications.getMuted(getContext())));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void setChatMuted(PluginCall call) {
+        String chatKey = call.getString("chatKey");
+        if (chatKey == null || chatKey.isEmpty()) {
+            call.reject("falta chatKey");
+            return;
+        }
+        ChatNotifications.setMuted(getContext(), chatKey, Boolean.TRUE.equals(call.getBoolean("muted", false)));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void consumeLaunchChat(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("chatKey", launchChatKey);
+        launchChatKey = null;
+        call.resolve(result);
     }
 
     // Si el usuario negó el permiso (Android 13+ deja de preguntar después de

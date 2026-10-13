@@ -4,4 +4,14 @@
     <string name="title_activity_main">FlashLab</string>
     <string name="package_name">com.flashlab.app</string>
     <string name="custom_url_scheme">com.flashlab.app</string>
+
+    <!-- Botones de la notificación de chat (FlashLabMessagingService). Este
+         archivo es el idioma por defecto (inglés); values-es/ tiene el
+         español. Android elige solo según el idioma del teléfono. -->
+    <string name="notification_reply">Reply</string>
+    <string name="notification_reply_hint">Message</string>
+    <string name="notification_mark_read">Mark as read</string>
+    <string name="notification_mute">Mute</string>
+    <string name="notification_you">You</string>
+    <string name="notification_reply_failed">Couldn\'t send the reply</string>
 </resources>

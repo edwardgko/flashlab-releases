@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { api } from './lib/api.js'
 import { useAuthSession, IS_CAPACITOR } from './lib/supabaseClient.js'
-import { setupPushNotifications } from './lib/pushNotifications.js'
+import { consumeLaunchChat, setupPushNotifications } from './lib/pushNotifications.js'
 import { requestOpenChat } from './lib/desktopNotify.js'
 import Sidebar from './components/Sidebar.jsx'
 import { isMobileNow, useIsMobile } from './lib/useIsMobile.js'
@@ -247,6 +247,23 @@ export default function App({ theme, setTheme }) {
       }),
     [patchActiveTab]
   )
+
+  // Android: lo mismo al tocar la notificación nativa de un mensaje (la app
+  // arranca o vuelve a primer plano con ese chat pendiente en el nativo)
+  useEffect(() => {
+    if (!IS_CAPACITOR || !activeTabId) return undefined
+    const openLaunchChat = () =>
+      consumeLaunchChat().then((chatKey) => {
+        if (!chatKey) return
+        patchActiveTab({ kind: 'chat' })
+        requestOpenChat(chatKey)
+      })
+    openLaunchChat()
+    const subPromise = CapacitorApp.addListener('resume', openLaunchChat)
+    return () => {
+      subPromise.then((sub) => sub.remove())
+    }
+  }, [activeTabId, patchActiveTab])
 
   // Ctrl+P (o Cmd+P en mac) abre el quick switcher — el resto de los atajos
   // de pestañas (Ctrl+T/W/Tab/1-9) se agregan más abajo, una vez definidas

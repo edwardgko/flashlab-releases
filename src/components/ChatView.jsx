@@ -65,6 +65,7 @@ import { getDriveMediaProxyUrl } from '../lib/webDrive.js'
 import { api, isDesktop } from '../lib/api.js'
 import { cancelUpload, enqueueUpload, getSnapshot as getUploadsSnapshot, subscribe as subscribeUploads } from '../lib/backgroundUploads.js'
 import { consumePendingChat, setActiveChatViewing } from '../lib/desktopNotify.js'
+import { getMutedChats, setChatMuted, setNativeViewingChat } from '../lib/pushNotifications.js'
 
 // menús flotantes (clic derecho, reacciones) se posicionan en el punto
 // exacto del clic — cerca de un borde de la ventana eso los cortaba (ver
@@ -1693,8 +1694,36 @@ export default function ChatView({ insetLeft = false, sidebarOpen = false }) {
 
   useEffect(() => {
     setActiveChatViewing(activeChatKey)
-    return () => setActiveChatViewing(null)
+    if (IS_CAPACITOR) setNativeViewingChat(activeChatKey)
+    return () => {
+      setActiveChatViewing(null)
+      if (IS_CAPACITOR) setNativeViewingChat(null)
+    }
   }, [activeChatKey])
+
+  // Android: chats silenciados con el botón "Silenciar" de la notificación —
+  // quedan así hasta reactivarlos con la campanita del chat (solo en este
+  // teléfono). Se relee al volver a la app: se pudo silenciar desde la
+  // notificación con la app en segundo plano.
+  const [mutedChats, setMutedChats] = useState(() => new Set())
+  useEffect(() => {
+    if (!IS_CAPACITOR) return undefined
+    const load = () => getMutedChats().then(setMutedChats)
+    load()
+    const subPromise = CapacitorApp.addListener('resume', load)
+    return () => {
+      subPromise.then((sub) => sub.remove())
+    }
+  }, [])
+  const activeChatMuted = activeChatKey ? mutedChats.has(activeChatKey) : false
+  const toggleActiveChatMuted = () => {
+    if (!activeChatKey) return
+    const next = new Set(mutedChats)
+    if (activeChatMuted) next.delete(activeChatKey)
+    else next.add(activeChatKey)
+    setMutedChats(next)
+    setChatMuted(activeChatKey, !activeChatMuted)
+  }
 
   // en localStorage se guarda el ID del archivo en Drive, no una URL: en la
   // web la URL mostrable es un blob temporal que no sobrevive a un reload
@@ -3056,6 +3085,17 @@ export default function ChatView({ insetLeft = false, sidebarOpen = false }) {
                     {activeGroupId ? activeGroup?.name : knownEmails.get(activeId) ?? activeId}
                   </button>
                 </div>
+                {IS_CAPACITOR && (
+                  <button
+                    type="button"
+                    aria-label={activeChatMuted ? 'Activar notificaciones' : 'Silenciar notificaciones'}
+                    title={activeChatMuted ? 'Activar notificaciones' : 'Silenciar notificaciones'}
+                    onClick={toggleActiveChatMuted}
+                    className="shrink-0 cursor-pointer rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                  >
+                    {activeChatMuted ? '🔕' : '🔔'}
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-label={activeGroupId ? 'Información del grupo' : 'Información del chat'}

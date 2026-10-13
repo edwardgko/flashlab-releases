@@ -1,6 +1,5 @@
 import { isDesktop } from './api.js'
 import { IS_CAPACITOR } from './supabaseClient.js'
-import { LocalNotifications } from '@capacitor/local-notifications'
 
 let permissionAsked = false
 let activeChatKey = null
@@ -96,8 +95,7 @@ export function consumePendingChat() {
 
 // Dispara una notificación nativa del sistema según la plataforma:
 // - Windows Desktop: toast nativo del SO a través de Electron Notification (con ícono y sonido).
-// - Android: si la app está en segundo plano o cerrada, FCM se encarga directamente vía Android OS;
-//            si está en primer plano y en otra vista, se muestra con LocalNotifications.
+// - Android: nada desde acá — la arma el nativo con el push (ver más abajo).
 // - Web: HTML5 Notification estándar.
 // Si el usuario tiene la app enfocada y está leyendo ese mismo chat, no se interrumpe.
 export async function notifyNewMessage(title, body, chatKey = null, uniqueId = null) {
@@ -128,37 +126,11 @@ export async function notifyNewMessage(title, body, chatKey = null, uniqueId = n
     }
   }
 
-  // 2. Android (Capacitor)
-  if (IS_CAPACITOR) {
-    // Si la app está en segundo plano (minimizada o pantalla bloqueada),
-    // FCM de Google Play Services se encarga de mostrar la notificación
-    // nativa directamente en la barra de estado. NO programamos LocalNotifications
-    // acá porque causaría una notificación duplicada ("aparece 2 veces").
-    if (document.hidden) {
-      return
-    }
-
-    // Si la app está en primer plano (visible pero en otra sección),
-    // mostramos la notificación local con sonido y heads-up banner.
-    try {
-      const notifId = (hashString(contentKey) % 10000000) + 1
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            title: title || 'FlashLab',
-            body: body || '',
-            id: notifId,
-            channelId: 'flashlab_messages_v2',
-            smallIcon: 'ic_stat_notification',
-            sound: 'default',
-          },
-        ],
-      })
-      return
-    } catch (err) {
-      console.warn('Error en notificación nativa de Android:', err)
-    }
-  }
+  // 2. Android (Capacitor): la notificación la arma SIEMPRE el código nativo
+  // a partir del push (ChatNotifications.java: foto, Responder / Marcar como
+  // leído / Silenciar), también con la app abierta en otra pantalla. Mostrar
+  // otra acá desde JS la duplicaría.
+  if (IS_CAPACITOR) return
 
   // 3. Fallback Web Browser estándar
   if (typeof Notification !== 'undefined') {

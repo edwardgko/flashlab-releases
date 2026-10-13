@@ -53,6 +53,11 @@
             android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
             tools:node="remove" />
 
+        <!-- Botones Responder / Marcar como leído / Silenciar de la notificación de chat -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false" />
+
         <!-- Servicio nativo único de FlashLab con prioridad máxima -->
         <service
             android:name=".FlashLabMessagingService"
