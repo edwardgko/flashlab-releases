@@ -74,20 +74,32 @@ try {
   console.log(`(Aviso en sincronización git: ${e.message})`);
 }
 
-// 2. Pre-crear el release en GitHub para evitar race condition de electron-builder
+// /releases/tags/{tag} NO devuelve borradores — se busca en la lista (que sí
+// los incluye para quien tiene permiso de escritura)
+async function findRelease() {
+  const list = await ghRequest({
+    hostname: 'api.github.com',
+    path: `/repos/${repo}/releases?per_page=30`,
+    method: 'GET'
+  });
+  return Array.isArray(list.body) ? list.body.find(r => r.tag_name === tag) : null;
+}
+
+// 2. Pre-crear el release en GitHub para evitar race condition de electron-builder.
+// Como BORRADOR: si se publicaba ya acá, durante los minutos de build las apps
+// veían "v0.1.X disponible" sin latest.yml todavía y mostraban
+// "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND ... 404" (pasó con v0.1.90). Los
+// borradores no aparecen en /releases/latest ni en el feed que lee
+// electron-updater; se publica al final, con todos los archivos arriba.
 let releaseId = null;
 if (token) {
   try {
-    const checkRel = await ghRequest({
-      hostname: 'api.github.com',
-      path: `/repos/${repo}/releases/tags/${tag}`,
-      method: 'GET'
-    });
-    if (checkRel.body && checkRel.body.id) {
-      releaseId = checkRel.body.id;
-      console.log(`✓ Release ${tag} ya existente en GitHub (id: ${releaseId}).`);
+    const existing = await findRelease();
+    if (existing) {
+      releaseId = existing.id;
+      console.log(`✓ Release ${tag} ya existente en GitHub (id: ${releaseId}${existing.draft ? ', borrador' : ''}).`);
     } else {
-      console.log(`📦 Creando release ${tag} en GitHub...`);
+      console.log(`📦 Creando release ${tag} (borrador) en GitHub...`);
       const createRel = await ghRequest({
         hostname: 'api.github.com',
         path: `/repos/${repo}/releases`,
@@ -96,7 +108,7 @@ if (token) {
       }, JSON.stringify({
         tag_name: tag,
         name: tag,
-        draft: false,
+        draft: true,
         prerelease: false
       }));
       releaseId = createRel.body?.id;
@@ -132,10 +144,12 @@ try {
   console.log('(electron-builder completado, asegurando artefactos en GitHub...)');
 }
 
+// devuelve true solo si el archivo quedó subido (el release se publica
+// únicamente si TODOS los archivos subieron bien)
 async function uploadAsset(relId, assetName, filePath, contentType = 'application/octet-stream') {
   if (!fs.existsSync(filePath)) {
     console.error(`Archivo no encontrado: ${filePath}`);
-    return;
+    return false;
   }
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
@@ -158,7 +172,7 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
   }
 
   console.log(`⬆ Subiendo ${assetName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)...`);
-  await new Promise((resolve) => {
+  return new Promise((resolve) => {
     const req = https.request({
       hostname: 'uploads.github.com',
       path: `/repos/${repo}/releases/${relId}/assets?name=${encodeURIComponent(assetName)}`,
@@ -175,16 +189,16 @@ async function uploadAsset(relId, assetName, filePath, contentType = 'applicatio
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           console.log(`✓ ${assetName} subido.`);
-          resolve();
+          resolve(true);
         } else {
           console.error(`Error subiendo ${assetName}:`, res.statusCode, d);
-          resolve();
+          resolve(false);
         }
       });
     });
     req.on('error', (err) => {
       console.error(`Error de red subiendo ${assetName}:`, err.message);
-      resolve();
+      resolve(false);
     });
     const stream = fs.createReadStream(filePath);
     stream.pipe(req);
@@ -198,18 +212,12 @@ async function ensureAllAssets() {
     return;
   }
 
-  const res = await ghRequest({
-    hostname: 'api.github.com',
-    path: `/repos/${repo}/releases/tags/${tag}`,
-    method: 'GET'
-  });
-
-  if (!res.body || !res.body.id) {
+  if (!releaseId) releaseId = (await findRelease())?.id ?? null;
+  if (!releaseId) {
     console.log('No se pudo encontrar el release en GitHub.');
     return;
   }
 
-  releaseId = res.body.id;
   const buildDir = 'C:/flashlab-build/release';
 
   let exeName = `FlashLab-Setup-${version}.exe`;
@@ -237,9 +245,11 @@ async function ensureAllAssets() {
     console.warn(`(Aviso copiando al escritorio: ${copyErr.message})`);
   }
 
-  await uploadAsset(releaseId, exeName, exePath);
-  await uploadAsset(releaseId, blockmapName, blockmapPath);
-  await uploadAsset(releaseId, 'latest.yml', ymlPath);
+  const uploads = [
+    await uploadAsset(releaseId, exeName, exePath),
+    await uploadAsset(releaseId, blockmapName, blockmapPath),
+    await uploadAsset(releaseId, 'latest.yml', ymlPath),
+  ];
 
   // 6. Buildear y subir el .apk de Android (regla de oro de CLAUDE.md)
   console.log(`\n🤖 Compilando APK de Android para ${tag}...`);
@@ -257,12 +267,32 @@ async function ensureAllAssets() {
 
     const apkPath = path.resolve('android/app/build/outputs/apk/release/app-release.apk');
     const apkName = `FlashLab-${version}.apk`;
-    await uploadAsset(releaseId, apkName, apkPath, 'application/vnd.android.package-archive');
+    uploads.push(await uploadAsset(releaseId, apkName, apkPath, 'application/vnd.android.package-archive'));
   } catch (err) {
     console.error('⚠️ Error al generar o subir el APK de Android:', err.message);
+    uploads.push(false);
   }
 
-  console.log(`\n✨ ¡Release ${tag} 100% completo en GitHub! Contiene .exe y .apk sincronizados.\n`);
+  // 7. Publicar (salir de borrador) recién con TODO arriba: nunca un release
+  // visible a medias ni con un solo instalador
+  if (uploads.some(ok => !ok)) {
+    console.error(`\n⚠️ Faltó subir algún archivo: ${tag} queda como BORRADOR (las apps no lo ven). Corregí y volvé a correr npm run release.\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const publish = await ghRequest({
+    hostname: 'api.github.com',
+    path: `/repos/${repo}/releases/${releaseId}`,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' }
+  }, JSON.stringify({ draft: false, make_latest: 'true' }));
+  if (publish.statusCode !== 200 || publish.body?.draft !== false) {
+    console.error(`\n⚠️ No se pudo publicar ${tag} (HTTP ${publish.statusCode}): queda como borrador.\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`\n✨ ¡Release ${tag} 100% completo y publicado en GitHub! Contiene .exe y .apk sincronizados.\n`);
 }
 
 await ensureAllAssets();
