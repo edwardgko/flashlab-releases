@@ -434,6 +434,10 @@ Regla general: cada fase termina con la app usable y estable. No se adelanta có
 - v0.1.92: cada movimiento lleva quincena (1ª = días 1-15, 2ª = 16 a fin de mes,
   `0029_finance_fortnight.sql`) y el resumen muestra ingresos/gastos/saldo de cada una. Lo
   cargado antes queda "sin quincena" (aviso con el total) hasta editarlo — no se adivina.
+- v0.1.93: orden manual arrastrando la manija ⋮⋮ de cada fila (pointer events, anda con mouse
+  y con el dedo; el DnD nativo de HTML5 no funciona con touch en el WebView de Android).
+  `sort_order` (`0030_finance_sort_order.sql`): al soltar cambia UNA fila (punto medio entre
+  vecinas), así el orden del resto no se toca en otros meses. Flechas ↑/↓ sobre la manija.
 - Se eligió una sección dedicada en vez de usar una base de datos de las existentes: la
   tabla no tiene sumas ni fórmulas, el filtro no se guarda y no hay filas que se repitan.
 

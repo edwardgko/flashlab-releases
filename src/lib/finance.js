@@ -7,7 +7,7 @@ import { supabase } from './supabaseClient.js'
 // del cliente: son unos cientos de filas en años de uso, y así el historial
 // no necesita una consulta por mes.
 
-const COLUMNS = 'id, kind, description, amount, category, start_month, recurring, end_month, fortnight, created_at'
+const COLUMNS = 'id, kind, description, amount, category, start_month, recurring, end_month, fortnight, sort_order, created_at'
 
 const FIELD_TO_COLUMN = {
   kind: 'kind',
@@ -18,6 +18,7 @@ const FIELD_TO_COLUMN = {
   recurring: 'recurring',
   endMonth: 'end_month',
   fortnight: 'fortnight',
+  sortOrder: 'sort_order',
 }
 
 async function currentUserId() {
@@ -38,6 +39,7 @@ const fromRow = (row) => ({
   recurring: row.recurring,
   endMonth: row.end_month,
   fortnight: row.fortnight ?? null,
+  sortOrder: row.sort_order ?? null,
   createdAt: row.created_at,
 })
 
@@ -215,7 +217,8 @@ export async function saveEntry(store, original, draft, viewMonth) {
     fortnight: draft.fortnight ?? null,
   }
   if (!original) {
-    return { upserted: [await store.create({ ...fields, startMonth: viewMonth })], removedIds: [] }
+    // al final de la lista (mismo número que usa el default de la columna)
+    return { upserted: [await store.create({ ...fields, startMonth: viewMonth, sortOrder: Date.now() / 1000 })], removedIds: [] }
   }
   if (!(original.recurring && viewMonth > original.startMonth)) {
     return { upserted: [await store.update(original.id, fields)], removedIds: [] }
@@ -224,7 +227,8 @@ export async function saveEntry(store, original, draft, viewMonth) {
     return { upserted: [], removedIds: [] }
   }
   const closed = await store.update(original.id, { endMonth: addMonths(viewMonth, -1) })
-  const opened = await store.create({ ...fields, startMonth: viewMonth })
+  // hereda el lugar en la lista: para quien mira, sigue siendo la misma fila
+  const opened = await store.create({ ...fields, startMonth: viewMonth, sortOrder: original.sortOrder ?? Date.now() / 1000 })
   return { upserted: [closed, opened], removedIds: [] }
 }
 
@@ -234,6 +238,38 @@ export async function removeEntry(store, entry, viewMonth) {
   }
   await store.remove(entry.id)
   return { upserted: [], removedIds: [entry.id] }
+}
+
+// --- orden manual (0030_finance_sort_order.sql) ---
+
+export function compareOrder(a, b) {
+  const pa = a.sortOrder ?? Infinity
+  const pb = b.sortOrder ?? Infinity
+  if (pa !== pb) return pa < pb ? -1 : 1
+  return String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''))
+}
+
+// qué sortOrder cambiar para mover `entryId` a `toIndex` dentro de `list`
+// (ya ordenada). Normalmente UNA sola fila: el punto medio entre sus nuevas
+// vecinas, así el orden del resto no cambia en ningún otro mes. Si entre las
+// vecinas ya no entra un número (muchos movimientos al mismo hueco), se
+// renumera la lista entera.
+export function reorderUpdates(list, entryId, toIndex) {
+  const from = list.findIndex((entry) => entry.id === entryId)
+  if (from === -1 || from === toIndex) return []
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(toIndex, 0, moved)
+  const before = next[toIndex - 1]?.sortOrder ?? null
+  const after = next[toIndex + 1]?.sortOrder ?? null
+  let position = 0
+  if (before !== null && after !== null) position = (before + after) / 2
+  else if (before !== null) position = before + 1
+  else if (after !== null) position = after - 1
+  const fits = (before === null || position > before) && (after === null || position < after)
+  if (fits) return [{ id: moved.id, sortOrder: position }]
+  const base = Math.min(...next.map((entry) => entry.sortOrder ?? 0))
+  return next.map((entry, i) => ({ id: entry.id, sortOrder: base + i }))
 }
 
 export const DEFAULT_CATEGORIES = {

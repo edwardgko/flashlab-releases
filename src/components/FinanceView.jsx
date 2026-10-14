@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { IS_CAPACITOR } from '../lib/supabaseClient.js'
 import { onReloadContent } from '../lib/liveSync.js'
@@ -8,6 +8,7 @@ import {
   FORTNIGHT_RANGE,
   addMonths,
   appliesToMonth,
+  compareOrder,
   defaultFortnight,
   formatMoney,
   formatPlain,
@@ -16,6 +17,7 @@ import {
   monthTotals,
   parseAmount,
   removeEntry,
+  reorderUpdates,
   saveEntry,
   supabaseFinanceStore,
 } from '../lib/finance.js'
@@ -60,7 +62,23 @@ function SectionLabel({ children, right }) {
   )
 }
 
-function EntryRow({ entry, onOpen }) {
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+      {[6, 12, 18].map((y) => (
+        <g key={y}>
+          <circle cx="9" cy={y} r="1.6" />
+          <circle cx="15" cy={y} r="1.6" />
+        </g>
+      ))}
+    </svg>
+  )
+}
+
+// shifting: hay un arrastre en curso y esta fila se corre para hacerle
+// lugar. La transición va SOLO entonces: si quedara puesta al soltar, el
+// salto del transform al orden nuevo se animaría y las filas "volarían".
+function EntryRow({ entry, onOpen, handleProps, style, dragging, shifting }) {
   const fixedLabel = entry.recurring
     ? entry.endMonth
       ? `Fijo hasta ${monthLabel(entry.endMonth, { short: true })}`
@@ -69,11 +87,32 @@ function EntryRow({ entry, onOpen }) {
   const fortnightLabel = FORTNIGHT_LABEL[entry.fortnight] ?? 'Sin quincena'
   const meta = [fortnightLabel, entry.category, fixedLabel].filter(Boolean).join(' · ')
   return (
-    <li>
+    <li
+      style={style}
+      className={`relative flex items-center bg-white dark:bg-neutral-800 ${
+        dragging
+          ? 'z-10 rounded-lg shadow-lg ring-1 ring-gray-200 dark:ring-neutral-600'
+          : shifting
+            ? 'transition-transform duration-150'
+            : ''
+      }`}
+    >
+      {/* manija aparte (no toda la fila): así tocar la fila sigue abriendo
+          la edición y deslizar el dedo fuera de la manija sigue scrolleando.
+          touch-none: sin eso Android se lleva el gesto para scrollear */}
+      <button
+        type="button"
+        {...handleProps}
+        aria-label={`Mover ${entry.description || 'movimiento'} (flechas arriba/abajo)`}
+        title="Arrastrá para cambiar el orden"
+        className="flex h-11 w-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-gray-400 hover:text-gray-600 active:cursor-grabbing dark:text-neutral-500 dark:hover:text-neutral-300"
+      >
+        <GripIcon />
+      </button>
       <button
         type="button"
         onClick={() => onOpen(entry)}
-        className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50 active:bg-gray-100 dark:hover:bg-white/5 dark:active:bg-white/10"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg py-2.5 pl-1 pr-3 text-left hover:bg-gray-50 active:bg-gray-100 dark:hover:bg-white/5 dark:active:bg-white/10"
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm text-gray-800 dark:text-neutral-100">
@@ -118,14 +157,127 @@ function FortnightCard({ id, totals }) {
   )
 }
 
-function EntryList({ entries, emptyText, onOpen }) {
+// arrastrar para reordenar con pointer events (no el drag & drop nativo de
+// HTML5, que con el dedo no anda en el WebView de Android): mismo código
+// para mouse y touch. Las filas no se mueven en el DOM mientras se arrastra,
+// solo se corren con transform; el orden real cambia recién al soltar.
+const AUTOSCROLL_EDGE = 56
+
+function EntryList({ entries, emptyText, onOpen, onReorder }) {
+  const listRef = useRef(null)
+  // lo que cambia en cada pointermove sin necesitar render propio
+  const dragRef = useRef(null)
+  const [drag, setDrag] = useState(null) // { from, over, dy, height }
+
+  useEffect(() => () => cancelAnimationFrame(dragRef.current?.raf ?? 0), [])
+
+  const update = () => {
+    const d = dragRef.current
+    if (!d) return
+    // coordenadas de contenido (clientY + scroll), así el autoscroll no
+    // descuadra la fila de debajo del dedo
+    const dy = d.lastClientY + (d.scroller?.scrollTop ?? 0) - d.startY
+    const center = d.mids[d.from] + dy
+    d.over = d.mids.filter((mid, i) => i !== d.from && mid < center).length
+    setDrag({ from: d.from, over: d.over, dy, height: d.height })
+  }
+
+  const autoScroll = () => {
+    const d = dragRef.current
+    if (!d) return
+    if (d.scroller) {
+      const box = d.scroller.getBoundingClientRect()
+      let speed = 0
+      if (d.lastClientY < box.top + AUTOSCROLL_EDGE) {
+        speed = -Math.ceil((box.top + AUTOSCROLL_EDGE - d.lastClientY) / 6)
+      } else if (d.lastClientY > box.bottom - AUTOSCROLL_EDGE) {
+        speed = Math.ceil((d.lastClientY - (box.bottom - AUTOSCROLL_EDGE)) / 6)
+      }
+      if (speed) {
+        d.scroller.scrollTop += speed
+        update()
+      }
+    }
+    d.raf = requestAnimationFrame(autoScroll)
+  }
+
+  const startDrag = (event, index) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const scroller = listRef.current.closest('[data-finance-scroll]')
+    const scrollTop = scroller?.scrollTop ?? 0
+    const rects = [...listRef.current.children].map((row) => row.getBoundingClientRect())
+    dragRef.current = {
+      scroller,
+      from: index,
+      over: index,
+      height: rects[index].height,
+      startY: event.clientY + scrollTop,
+      lastClientY: event.clientY,
+      mids: rects.map((rect) => rect.top + scrollTop + rect.height / 2),
+      raf: 0,
+    }
+    dragRef.current.raf = requestAnimationFrame(autoScroll)
+    setDrag({ from: index, over: index, dy: 0, height: rects[index].height })
+  }
+
+  const moveDrag = (event) => {
+    if (!dragRef.current) return
+    dragRef.current.lastClientY = event.clientY
+    update()
+  }
+
+  const endDrag = (commit) => {
+    const d = dragRef.current
+    if (!d) return
+    cancelAnimationFrame(d.raf)
+    dragRef.current = null
+    setDrag(null)
+    if (commit && d.over !== d.from) onReorder(entries[d.from].id, d.over)
+  }
+
+  // teclado: flechas sobre la manija mueven de a un lugar
+  const onHandleKey = (event, index) => {
+    const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null
+    if (to === null) return
+    event.preventDefault()
+    if (to >= 0 && to < entries.length) onReorder(entries[index].id, to)
+  }
+
+  const styleFor = (index) => {
+    if (!drag) return undefined
+    if (index === drag.from) return { transform: `translateY(${drag.dy}px)` }
+    if (drag.from < drag.over && index > drag.from && index <= drag.over) {
+      return { transform: `translateY(${-drag.height}px)` }
+    }
+    if (drag.over < drag.from && index >= drag.over && index < drag.from) {
+      return { transform: `translateY(${drag.height}px)` }
+    }
+    return undefined
+  }
+
   if (entries.length === 0) {
     return <p className="px-3 py-2 text-sm text-gray-400 dark:text-neutral-500">{emptyText}</p>
   }
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-neutral-700/60">
-      {entries.map((entry) => (
-        <EntryRow key={entry.id} entry={entry} onOpen={onOpen} />
+    <ul ref={listRef} className="divide-y divide-gray-100 dark:divide-neutral-700/60">
+      {entries.map((entry, index) => (
+        <EntryRow
+          key={entry.id}
+          entry={entry}
+          onOpen={onOpen}
+          style={styleFor(index)}
+          dragging={drag?.from === index}
+          shifting={drag !== null && drag.from !== index}
+          handleProps={{
+            onPointerDown: (event) => startDrag(event, index),
+            onPointerMove: moveDrag,
+            onPointerUp: () => endDrag(true),
+            onPointerCancel: () => endDrag(false),
+            onKeyDown: (event) => onHandleKey(event, index),
+          }}
+        />
       ))}
     </ul>
   )
@@ -438,8 +590,26 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
 
   const closeSheet = useCallback(() => setSheet(null), [])
 
+  // optimista: la fila queda donde se soltó al instante; si el guardado
+  // falla se vuelve a traer todo para no mostrar un orden que no existe
+  const reorder = useCallback(
+    async (list, entryId, toIndex) => {
+      const updates = reorderUpdates(list, entryId, toIndex)
+      if (updates.length === 0) return
+      const byId = new Map(updates.map((u) => [u.id, u.sortOrder]))
+      setEntries((prev) => prev.map((entry) => (byId.has(entry.id) ? { ...entry, sortOrder: byId.get(entry.id) } : entry)))
+      try {
+        await Promise.all(updates.map((u) => store.update(u.id, { sortOrder: u.sortOrder })))
+      } catch (err) {
+        console.error('no se pudo guardar el orden:', err)
+        load()
+      }
+    },
+    [store, load]
+  )
+
   const all = entries ?? []
-  const monthEntries = all.filter((entry) => appliesToMonth(entry, month)).sort((a, b) => (a.fortnight ?? 3) - (b.fortnight ?? 3) || b.amount - a.amount)
+  const monthEntries = all.filter((entry) => appliesToMonth(entry, month)).sort(compareOrder)
   const incomes = monthEntries.filter((entry) => entry.kind === 'income')
   const expenses = monthEntries.filter((entry) => entry.kind === 'expense')
   const totals = monthTotals(all, month)
@@ -483,7 +653,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-8">
+      <div data-finance-scroll className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-8">
         <div className="mx-auto max-w-2xl">
           <div className="mt-1 flex items-center justify-between gap-2">
             <button
@@ -612,6 +782,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
                   entries={incomes}
                   emptyText="Sin ingresos este mes."
                   onOpen={(entry) => setSheet({ entry, kind: entry.kind })}
+                  onReorder={(entryId, toIndex) => reorder(incomes, entryId, toIndex)}
                 />
               </div>
 
@@ -626,6 +797,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
                   entries={expenses}
                   emptyText="Sin gastos este mes."
                   onOpen={(entry) => setSheet({ entry, kind: entry.kind })}
+                  onReorder={(entryId, toIndex) => reorder(expenses, entryId, toIndex)}
                 />
               </div>
 
