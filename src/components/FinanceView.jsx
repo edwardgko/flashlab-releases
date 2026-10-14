@@ -62,7 +62,7 @@ function SectionLabel({ children }) {
 }
 
 // cabecera de Ingresos/Gastos: el total es lo que más se mira, así que va
-// grande y con el color de su lado (verde entra, rojo sale) — el +/− del
+// grande y con el color de su lado (verde entra, azul sale; azul y no rojo para que no se lea como alarma) — el +/− del
 // ícono repite lo mismo para quien no distingue esos colores
 const SECTION_TONE = {
   income: {
@@ -75,9 +75,9 @@ const SECTION_TONE = {
   expense: {
     title: 'Gastos',
     sign: '−',
-    box: 'bg-rose-50 dark:bg-rose-500/10',
-    badge: 'bg-rose-600 text-white dark:bg-rose-500',
-    text: 'text-rose-800 dark:text-rose-300',
+    box: 'bg-blue-50 dark:bg-blue-500/10',
+    badge: 'bg-blue-600 text-white dark:bg-blue-500',
+    text: 'text-blue-800 dark:text-blue-300',
   },
 }
 
