@@ -53,14 +53,54 @@ function Chevron({ direction }) {
   )
 }
 
-function SectionLabel({ children, right }) {
+function SectionLabel({ children }) {
   return (
-    <div className="mb-1 flex items-baseline justify-between gap-2 px-1">
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-neutral-500">{children}</p>
-      {right && <p className="text-sm font-medium tabular-nums text-gray-700 dark:text-neutral-200">{right}</p>}
+    <p className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-neutral-500">
+      {children}
+    </p>
+  )
+}
+
+// cabecera de Ingresos/Gastos: el total es lo que más se mira, así que va
+// grande y con el color de su lado (verde entra, rojo sale) — el +/− del
+// ícono repite lo mismo para quien no distingue esos colores
+const SECTION_TONE = {
+  income: {
+    title: 'Ingresos',
+    sign: '+',
+    box: 'bg-emerald-50 dark:bg-emerald-500/10',
+    badge: 'bg-emerald-600 text-white dark:bg-emerald-500',
+    text: 'text-emerald-800 dark:text-emerald-300',
+  },
+  expense: {
+    title: 'Gastos',
+    sign: '−',
+    box: 'bg-rose-50 dark:bg-rose-500/10',
+    badge: 'bg-rose-600 text-white dark:bg-rose-500',
+    text: 'text-rose-800 dark:text-rose-300',
+  },
+}
+
+function SectionHeader({ kind, total, detail }) {
+  const tone = SECTION_TONE[kind]
+  return (
+    <div className={`mb-1 flex items-center gap-3 rounded-xl px-3 py-3 ${tone.box}`}>
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg font-bold leading-none ${tone.badge}`}
+        aria-hidden="true"
+      >
+        {tone.sign}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className={`text-base font-semibold ${tone.text}`}>{tone.title}</p>
+        {detail && <p className="text-xs text-gray-500 dark:text-neutral-400">{detail}</p>}
+      </div>
+      <p className={`shrink-0 text-xl font-bold tabular-nums sm:text-2xl ${tone.text}`}>{formatMoney(total)}</p>
     </div>
   )
 }
+
+const countLabel = (n) => `${n} ${n === 1 ? 'movimiento' : 'movimientos'}`
 
 function GripIcon() {
   return (
@@ -777,7 +817,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
               )}
 
               <div className="mt-6">
-                <SectionLabel right={formatMoney(totals.income)}>Ingresos</SectionLabel>
+                <SectionHeader kind="income" total={totals.income} detail={incomes.length > 0 && countLabel(incomes.length)} />
                 <EntryList
                   entries={incomes}
                   emptyText="Sin ingresos este mes."
@@ -787,12 +827,14 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
               </div>
 
               <div className="mt-6">
-                <SectionLabel right={formatMoney(totals.expense)}>Gastos</SectionLabel>
-                {expenses.length > 0 && (
-                  <p className="mb-1 px-1 text-xs text-gray-400 dark:text-neutral-500">
-                    Fijos {formatMoney(totals.fixedExpense)} · Variables {formatMoney(totals.variableExpense)}
-                  </p>
-                )}
+                <SectionHeader
+                  kind="expense"
+                  total={totals.expense}
+                  detail={
+                    expenses.length > 0 &&
+                    `Fijos ${formatMoney(totals.fixedExpense)} · Variables ${formatMoney(totals.variableExpense)}`
+                  }
+                />
                 <EntryList
                   entries={expenses}
                   emptyText="Sin gastos este mes."
