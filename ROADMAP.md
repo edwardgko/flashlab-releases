@@ -442,6 +442,10 @@ Regla general: cada fase termina con la app usable y estable. No se adelanta có
   la quincena también era null, y mes completo es justo lo que era — se fue el aviso de "sin
   quincena"). El detalle de Ingresos y de Gastos va seccionado por período con subtotal; el
   arrastre ordena dentro de cada sección (cambiar de período = editar el movimiento).
+- v0.1.97: el arrastre de Finanzas pasó a `lib/useSortableList.js` y lo usa también la vista
+  "Todas" (tabla) de las bases de datos, en lugar del DnD nativo de HTML5 (que con el dedo no
+  anda). Reordenar filas es optimista (`moveRow` en App.jsx) y se apaga también con un filtro
+  activo, no solo con orden/búsqueda.
 - Se eligió una sección dedicada en vez de usar una base de datos de las existentes: la
   tabla no tiene sumas ni fórmulas, el filtro no se guarda y no hay filas que se repitan.
 

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { IS_CAPACITOR } from '../lib/supabaseClient.js'
 import { onReloadContent } from '../lib/liveSync.js'
+import { useSortableList } from '../lib/useSortableList.js'
 import {
   DEFAULT_CATEGORIES,
   PERIODS,
@@ -197,123 +198,22 @@ function PeriodCard({ period, totals, className = '' }) {
   )
 }
 
-// arrastrar para reordenar con pointer events (no el drag & drop nativo de
-// HTML5, que con el dedo no anda en el WebView de Android): mismo código
-// para mouse y touch. Las filas no se mueven en el DOM mientras se arrastra,
-// solo se corren con transform; el orden real cambia recién al soltar.
-const AUTOSCROLL_EDGE = 56
-
+// arrastrar la manija reordena (ver useSortableList, compartido con la
+// tabla de las bases de datos)
 function EntryList({ entries, onOpen, onReorder }) {
-  const listRef = useRef(null)
-  // lo que cambia en cada pointermove sin necesitar render propio
-  const dragRef = useRef(null)
-  const [drag, setDrag] = useState(null) // { from, over, dy, height }
-
-  useEffect(() => () => cancelAnimationFrame(dragRef.current?.raf ?? 0), [])
-
-  const update = () => {
-    const d = dragRef.current
-    if (!d) return
-    // coordenadas de contenido (clientY + scroll), así el autoscroll no
-    // descuadra la fila de debajo del dedo
-    const dy = d.lastClientY + (d.scroller?.scrollTop ?? 0) - d.startY
-    const center = d.mids[d.from] + dy
-    d.over = d.mids.filter((mid, i) => i !== d.from && mid < center).length
-    setDrag({ from: d.from, over: d.over, dy, height: d.height })
-  }
-
-  const autoScroll = () => {
-    const d = dragRef.current
-    if (!d) return
-    if (d.scroller) {
-      const box = d.scroller.getBoundingClientRect()
-      let speed = 0
-      if (d.lastClientY < box.top + AUTOSCROLL_EDGE) {
-        speed = -Math.ceil((box.top + AUTOSCROLL_EDGE - d.lastClientY) / 6)
-      } else if (d.lastClientY > box.bottom - AUTOSCROLL_EDGE) {
-        speed = Math.ceil((d.lastClientY - (box.bottom - AUTOSCROLL_EDGE)) / 6)
-      }
-      if (speed) {
-        d.scroller.scrollTop += speed
-        update()
-      }
-    }
-    d.raf = requestAnimationFrame(autoScroll)
-  }
-
-  const startDrag = (event, index) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return
-    event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const scroller = listRef.current.closest('[data-finance-scroll]')
-    const scrollTop = scroller?.scrollTop ?? 0
-    const rects = [...listRef.current.children].map((row) => row.getBoundingClientRect())
-    dragRef.current = {
-      scroller,
-      from: index,
-      over: index,
-      height: rects[index].height,
-      startY: event.clientY + scrollTop,
-      lastClientY: event.clientY,
-      mids: rects.map((rect) => rect.top + scrollTop + rect.height / 2),
-      raf: 0,
-    }
-    dragRef.current.raf = requestAnimationFrame(autoScroll)
-    setDrag({ from: index, over: index, dy: 0, height: rects[index].height })
-  }
-
-  const moveDrag = (event) => {
-    if (!dragRef.current) return
-    dragRef.current.lastClientY = event.clientY
-    update()
-  }
-
-  const endDrag = (commit) => {
-    const d = dragRef.current
-    if (!d) return
-    cancelAnimationFrame(d.raf)
-    dragRef.current = null
-    setDrag(null)
-    if (commit && d.over !== d.from) onReorder(entries[d.from].id, d.over)
-  }
-
-  // teclado: flechas sobre la manija mueven de a un lugar
-  const onHandleKey = (event, index) => {
-    const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null
-    if (to === null) return
-    event.preventDefault()
-    if (to >= 0 && to < entries.length) onReorder(entries[index].id, to)
-  }
-
-  const styleFor = (index) => {
-    if (!drag) return undefined
-    if (index === drag.from) return { transform: `translateY(${drag.dy}px)` }
-    if (drag.from < drag.over && index > drag.from && index <= drag.over) {
-      return { transform: `translateY(${-drag.height}px)` }
-    }
-    if (drag.over < drag.from && index >= drag.over && index < drag.from) {
-      return { transform: `translateY(${drag.height}px)` }
-    }
-    return undefined
-  }
-
+  const sortable = useSortableList({
+    count: entries.length,
+    onReorder: (from, to) => onReorder(entries[from].id, to),
+  })
   return (
-    <ul ref={listRef} className="divide-y divide-gray-100 dark:divide-neutral-700/60">
+    <ul ref={sortable.containerRef} className="divide-y divide-gray-100 dark:divide-neutral-700/60">
       {entries.map((entry, index) => (
         <EntryRow
           key={entry.id}
           entry={entry}
           onOpen={onOpen}
-          style={styleFor(index)}
-          dragging={drag?.from === index}
-          shifting={drag !== null && drag.from !== index}
-          handleProps={{
-            onPointerDown: (event) => startDrag(event, index),
-            onPointerMove: moveDrag,
-            onPointerUp: () => endDrag(true),
-            onPointerCancel: () => endDrag(false),
-            onKeyDown: (event) => onHandleKey(event, index),
-          }}
+          {...sortable.itemState(index)}
+          handleProps={sortable.handleProps(index)}
         />
       ))}
     </ul>
@@ -729,7 +629,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
         </button>
       </div>
 
-      <div data-finance-scroll className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 sm:px-8">
         <div className="mx-auto max-w-2xl">
           <div className="mt-1 flex items-center justify-between gap-2">
             <button

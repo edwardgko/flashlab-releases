@@ -512,6 +512,24 @@ export default function App({ theme, setTheme }) {
     await syncFromBackend()
   }
 
+  // reordenar filas de una base (mismo padre, índice entre las DEMÁS filas,
+  // como movePage): optimista, como updateRowProperty — sin esto la fila
+  // soltada volvía a su lugar viejo hasta que terminaba el resync completo
+  // de syncFromBackend, y recién ahí saltaba a donde se la dejó.
+  const moveRow = async (parentId, rowId, newIndex) => {
+    setPages((prev) => {
+      const moved = prev.find((p) => p.id === rowId)
+      if (!moved) return prev
+      const siblings = prev
+        .filter((p) => p.parentId === parentId && !p.trashedAt && p.id !== rowId)
+        .sort((a, b) => a.order - b.order)
+      siblings.splice(Math.max(0, Math.min(newIndex, siblings.length)), 0, moved)
+      const orderById = new Map(siblings.map((p, i) => [p.id, i]))
+      return prev.map((p) => (orderById.has(p.id) ? { ...p, order: orderById.get(p.id) } : p))
+    })
+    await movePage(rowId, parentId, newIndex)
+  }
+
   // duplica una página (o una fila de base de datos, que también es una
   // página) junto con su subárbol activo; enfoca la copia en la pestaña actual
   const duplicatePage = async (id) => {
@@ -809,7 +827,7 @@ export default function App({ theme, setTheme }) {
                 rows={currentRows}
                 onCreateRow={(properties) => createRow(current.id, properties)}
                 onDuplicateRow={duplicateRow}
-                onMoveRow={(rowId, newIndex) => movePage(rowId, current.id, newIndex)}
+                onMoveRow={(rowId, newIndex) => moveRow(current.id, rowId, newIndex)}
                 onTrashRows={trashRows}
                 onUpdateProperty={updateRowProperty}
                 onUpdateSchema={(schema) => updateDatabaseSchema(current.id, schema)}
@@ -849,7 +867,7 @@ export default function App({ theme, setTheme }) {
             rows={peekRows}
             onCreateRow={(properties) => createRow(peekPage.id, properties)}
             onDuplicateRow={duplicateRow}
-            onMoveRow={(rowId, newIndex) => movePage(rowId, peekPage.id, newIndex)}
+            onMoveRow={(rowId, newIndex) => moveRow(peekPage.id, rowId, newIndex)}
             onTrashRows={trashRows}
             onUpdateProperty={updateRowProperty}
             onUpdateSchema={(schema) => updateDatabaseSchema(peekPage.id, schema)}

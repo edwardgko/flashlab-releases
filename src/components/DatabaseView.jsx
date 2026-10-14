@@ -4,6 +4,7 @@ import SchemaEditor, { COLOR_PALETTE, CREATABLE_TYPE_LABEL } from './SchemaEdito
 import { isImageIcon } from '../lib/icon.js'
 import { setDragPreview, setDragPreviewFromHandle } from '../lib/dragPreview.js'
 import { useIsMobile } from '../lib/useIsMobile.js'
+import { useSortableList } from '../lib/useSortableList.js'
 
 function GalleryIcon() {
   return (
@@ -942,12 +943,10 @@ function TableRowView({
   onDuplicateRow,
   onUpdatePropOptions,
   reorderable,
-  dropSide,
-  onDragStart,
-  onDragEndRow,
-  onDragOverRow,
-  onDragLeaveRow,
-  onDropRow,
+  handleProps,
+  style,
+  dragging,
+  shifting,
   remoteCollaborator,
   onFocus,
   onBlur,
@@ -955,19 +954,15 @@ function TableRowView({
   return (
     <tr
       data-row-id={row.id}
-      onDragOver={onDragOverRow}
-      onDragLeave={onDragLeaveRow}
-      onDrop={(event) => {
-        event.preventDefault()
-        onDropRow?.()
-      }}
-      // el indicador de dónde va a caer la fila (línea arriba/abajo, mismo
-      // criterio que dropHint en las columnas del header) tiene que vivir en
-      // el borde de la FILA, no de una celda — por eso border-t/b acá y no
-      // dentro de un <td>.
-      className={`border-b border-gray-100 dark:border-neutral-700 ${selected ? 'bg-blue-50/60 dark:bg-blue-500/10' : ''} ${
-        dropSide === 'before' ? 'border-t-2 border-t-blue-400' : ''
-      } ${dropSide === 'after' ? 'border-b-2 border-b-blue-400' : ''}`}
+      style={style}
+      // arrastre con useSortableList (mismo de Finanzas): la fila que se
+      // lleva va por encima con fondo propio (si no, se ve el texto de las
+      // de abajo a través), y las demás se corren para hacerle lugar
+      className={`border-b border-gray-100 dark:border-neutral-700 ${
+        dragging
+          ? 'relative z-10 bg-white shadow-lg dark:bg-neutral-700'
+          : `${selected ? 'bg-blue-50/60 dark:bg-blue-500/10' : ''} ${shifting ? 'transition-transform duration-150' : ''}`
+      }`}
     >
       <td className="relative p-0 align-top">
         {remoteCollaborator && (
@@ -1021,21 +1016,14 @@ function TableRowView({
           {reorderable && (
             <button
               type="button"
-              aria-label="Arrastrar para reordenar"
+              aria-label="Arrastrar para reordenar (o flechas arriba/abajo)"
               title="Arrastrar para reordenar"
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = 'move'
-                // sin esto, lo que sigue al cursor es la foto del botón: un
-                // cuadradito con los 6 puntos y nada más (ver dragPreview.js)
-                setDragPreviewFromHandle(event, 'tr[data-row-id]')
-                onDragStart()
-              }}
-              onDragEnd={onDragEndRow}
+              {...handleProps}
               // cursor-grab (no cursor-pointer): esto no hace nada al
               // CLICKEARLO, solo al arrastrarlo — el cursor tiene que
               // comunicar eso, no invitar a un click que no pasa nada.
-              className="cursor-grab rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 active:cursor-grabbing dark:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-400"
+              // touch-none: sin eso Android se lleva el gesto para scrollear
+              className="cursor-grab touch-none rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-gray-500 active:cursor-grabbing dark:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-400"
             >
               <GripIcon />
             </button>
@@ -1443,19 +1431,12 @@ function TableView({
   // natural: con una columna ordenada o una búsqueda activa, el índice que
   // se vería acá no correspondería al índice real entre TODAS las filas —
   // `reorderable` (calculado en DatabaseView) apaga el arrastre en esos casos.
-  const [dragRowId, setDragRowId] = useState(null)
-  const [rowDropHint, setRowDropHint] = useState(null) // { rowId, side } | null
-  const handleRowDrop = (targetId, side) => {
-    if (dragRowId && dragRowId !== targetId) {
-      const withoutDragged = rows.filter((r) => r.id !== dragRowId)
-      let targetIdx = withoutDragged.findIndex((r) => r.id === targetId)
-      if (targetIdx === -1) targetIdx = withoutDragged.length
-      if (side === 'after') targetIdx += 1
-      onMoveRow?.(dragRowId, targetIdx)
-    }
-    setDragRowId(null)
-    setRowDropHint(null)
-  }
+  // El `to` de useSortableList ya es el índice entre las DEMÁS filas, que es
+  // lo que espera movePage.
+  const sortable = useSortableList({
+    count: rows.length,
+    onReorder: (from, to) => onMoveRow?.(rows[from].id, to),
+  })
   const [colWidths, setColWidths] = useState({}) // propId -> px, override local mientras se arrastra
   const [selected, setSelected] = useState(new Set())
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -1741,8 +1722,8 @@ function TableView({
             <th className="p-0" aria-hidden="true" />
           </tr>
         </thead>
-        <tbody>
-          {rows.map((row) => {
+        <tbody ref={sortable.containerRef}>
+          {rows.map((row, index) => {
             const remoteCollab = Object.values(remoteCursors || {}).find(
               (c) => !c?.hidden && c?.activeRowId === row.id
             )
@@ -1759,23 +1740,8 @@ function TableView({
                 onDuplicateRow={onDuplicateRow}
                 onUpdatePropOptions={updatePropOptions}
                 reorderable={reorderable}
-                dropSide={dragRowId && rowDropHint?.rowId === row.id ? rowDropHint.side : null}
-                onDragStart={() => setDragRowId(row.id)}
-                onDragEndRow={() => {
-                  setDragRowId(null)
-                  setRowDropHint(null)
-                }}
-                onDragOverRow={(event) => {
-                  if (!dragRowId || dragRowId === row.id) return
-                  event.preventDefault()
-                  const rect = event.currentTarget.getBoundingClientRect()
-                  const side = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
-                  setRowDropHint({ rowId: row.id, side })
-                }}
-                onDragLeaveRow={(event) => {
-                  if (event.currentTarget === event.target) setRowDropHint(null)
-                }}
-                onDropRow={() => handleRowDrop(row.id, rowDropHint?.side ?? 'before')}
+                handleProps={sortable.handleProps(index)}
+                {...sortable.itemState(index)}
                 remoteCollaborator={remoteCollab}
                 onFocus={(rowId) => broadcastElementFocus?.({ rowId })}
                 onBlur={() => broadcastElementFocus?.({ rowId: null })}
@@ -2018,9 +1984,11 @@ export default function DatabaseView({
   // de las filas: con una columna de "Ordenar" activa, o buscando, el índice
   // que se ve en pantalla no corresponde al índice real entre todas las
   // filas de la base — soltar ahí movería la fila a un lugar distinto del
-  // que se ve, apenas se borre el filtro/orden. Con las dos apagadas,
-  // visibleRows queda igual a rows (mismo orden), así que sí es seguro.
-  const reorderable = Boolean(onMoveRow) && !sort && !search.trim()
+  // que se ve, apenas se borre el filtro/orden. Lo mismo con un filtro: oculta
+  // filas, y el índice entre las visibles deja de ser el índice real. Con los
+  // tres apagados, visibleRows queda igual a rows (mismo orden), así que sí
+  // es seguro.
+  const reorderable = Boolean(onMoveRow) && !sort && !search.trim() && !filter
 
   const toggle = (panel) => setOpenPanel((p) => (p === panel ? null : panel))
 
