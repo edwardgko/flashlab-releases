@@ -462,9 +462,11 @@ export default function App({ theme, setTheme }) {
   // crear una fila (página con propiedades) sin salir de la vista de la base de datos
   // sin resync completo — api.createPage ya devuelve la fila creada, alcanza
   // con sumarla al estado local (mismo motivo que updateRowProperty)
+  // devuelve la fila: el botón "Nuevo" de DatabaseView la abre en el peek
   const createRow = async (parentId, properties) => {
     const page = await api.createPage('', parentId, properties)
     setPages((prev) => [...prev, page])
+    return page
   }
 
   // duplicar una fila sin salir de la vista de la base de datos (a diferencia

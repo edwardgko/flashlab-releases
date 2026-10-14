@@ -1992,6 +1992,17 @@ export default function DatabaseView({
 
   const toggle = (panel) => setOpenPanel((p) => (p === panel ? null : panel))
 
+  // "Nuevo", como en Notion: crea la página y la abre en el panel lateral
+  // para escribirle el título. Antes solo la creaba vacía y sin estado, y en
+  // el Tablero eso la mandaba a "Sin estado" — la última columna, casi
+  // siempre fuera de pantalla —, así que parecía que el botón no hacía nada.
+  // En el Tablero va a la primera columna.
+  const createAndOpen = async () => {
+    const properties = view === 'board' && groupProp?.options?.length ? { [groupProp.id]: groupProp.options[0].id } : {}
+    const created = await onCreateRow(properties)
+    if (created?.id) onOpenRow(created.id)
+  }
+
   const dbContainerRef = useRef(null)
   const isMobile = useIsMobile()
 
@@ -2062,7 +2073,8 @@ export default function DatabaseView({
           <ToolbarButton label="Configuración" icon={<SettingsIcon />} active={openPanel === 'settings'} onClick={() => toggle('settings')} />
           <button
             type="button"
-            onClick={() => onCreateRow({})}
+            onClick={createAndOpen}
+            title="Nueva página en esta base de datos"
             className="ml-1 flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             <PlusIcon /> Nuevo
