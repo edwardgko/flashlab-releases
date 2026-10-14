@@ -116,9 +116,20 @@ export function appliesToMonth(entry, key) {
 }
 
 // --- quincenas (0029_finance_fortnight.sql) ---
+// fortnight 1 = días 1 a 15, 2 = del 16 a fin de mes, null = mes completo
+// (no cae en una quincena en particular). Lo cargado antes de que existiera
+// la columna también quedó en null, y "mes completo" es justo lo que era.
+// En los totales y las secciones, null es el período 0.
 
-export const FORTNIGHT_LABEL = { 1: '1ª quincena', 2: '2ª quincena' }
-export const FORTNIGHT_RANGE = { 1: 'días 1 al 15', 2: 'del 16 a fin de mes' }
+export const PERIODS = [
+  { id: 1, fortnight: 1, label: '1ª quincena', range: 'días 1 al 15', option: '1ª (1–15)' },
+  { id: 2, fortnight: 2, label: '2ª quincena', range: 'del 16 a fin de mes', option: '2ª (16–fin)' },
+  { id: 0, fortnight: null, label: 'Mes completo', range: 'sin quincena fija', option: 'Mes completo' },
+]
+
+export function periodOf(entry) {
+  return entry.fortnight === 1 || entry.fortnight === 2 ? entry.fortnight : 0
+}
 
 // para un movimiento nuevo: la quincena en curso si se está mirando el mes
 // actual, la primera si no
@@ -130,11 +141,11 @@ export function monthTotals(entries, key) {
   let income = 0
   let fixedExpense = 0
   let variableExpense = 0
-  // 1 y 2 = quincenas; 0 = lo cargado antes de que existiera la quincena
+  // por período (ver PERIODS): 1 y 2 = quincenas, 0 = mes completo
   const buckets = { 0: { income: 0, expense: 0, count: 0 }, 1: { income: 0, expense: 0, count: 0 }, 2: { income: 0, expense: 0, count: 0 } }
   for (const entry of entries) {
     if (!appliesToMonth(entry, key)) continue
-    const bucket = buckets[entry.fortnight] ?? buckets[0]
+    const bucket = buckets[periodOf(entry)]
     bucket.count += 1
     if (entry.kind === 'income') {
       income += entry.amount
@@ -148,9 +159,9 @@ export function monthTotals(entries, key) {
   const expense = fixedExpense + variableExpense
   // redondeo a centavos: sumar decimales en float deja colas tipo 0.30000000000000004
   const round = (n) => Math.round(n * 100) / 100
-  const fortnights = {}
+  const periods = {}
   for (const [id, bucket] of Object.entries(buckets)) {
-    fortnights[id] = {
+    periods[id] = {
       income: round(bucket.income),
       expense: round(bucket.expense),
       balance: round(bucket.income - bucket.expense),
@@ -163,7 +174,7 @@ export function monthTotals(entries, key) {
     fixedExpense: round(fixedExpense),
     variableExpense: round(variableExpense),
     balance: round(income - expense),
-    fortnights,
+    periods,
   }
 }
 

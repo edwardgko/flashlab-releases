@@ -4,8 +4,7 @@ import { IS_CAPACITOR } from '../lib/supabaseClient.js'
 import { onReloadContent } from '../lib/liveSync.js'
 import {
   DEFAULT_CATEGORIES,
-  FORTNIGHT_LABEL,
-  FORTNIGHT_RANGE,
+  PERIODS,
   addMonths,
   appliesToMonth,
   compareOrder,
@@ -16,6 +15,7 @@ import {
   monthLabel,
   monthTotals,
   parseAmount,
+  periodOf,
   removeEntry,
   reorderUpdates,
   saveEntry,
@@ -124,8 +124,8 @@ function EntryRow({ entry, onOpen, handleProps, style, dragging, shifting }) {
       ? `Fijo hasta ${monthLabel(entry.endMonth, { short: true })}`
       : 'Fijo'
     : null
-  const fortnightLabel = FORTNIGHT_LABEL[entry.fortnight] ?? 'Sin quincena'
-  const meta = [fortnightLabel, entry.category, fixedLabel].filter(Boolean).join(' · ')
+  // la quincena no va acá: la fila ya está dentro de la sección de su período
+  const meta = [entry.category, fixedLabel].filter(Boolean).join(' · ')
   return (
     <li
       style={style}
@@ -168,12 +168,12 @@ function EntryRow({ entry, onOpen, handleProps, style, dragging, shifting }) {
   )
 }
 
-function FortnightCard({ id, totals }) {
+function PeriodCard({ period, totals, className = '' }) {
   const status = balanceStatus(totals.balance)
   return (
-    <div className="rounded-xl border border-gray-200 p-3 dark:border-neutral-700">
-      <p className="text-sm font-medium text-gray-800 dark:text-neutral-100">{FORTNIGHT_LABEL[id]}</p>
-      <p className="text-[11px] text-gray-400 dark:text-neutral-500">{FORTNIGHT_RANGE[id]}</p>
+    <div className={`rounded-xl border border-gray-200 p-3 dark:border-neutral-700 ${className}`}>
+      <p className="text-sm font-medium text-gray-800 dark:text-neutral-100">{period.label}</p>
+      <p className="text-[11px] text-gray-400 dark:text-neutral-500">{period.range}</p>
       <dl className="mt-2 space-y-1 text-xs">
         <div className="flex justify-between gap-2">
           <dt className="text-gray-400 dark:text-neutral-500">Ingresos</dt>
@@ -203,7 +203,7 @@ function FortnightCard({ id, totals }) {
 // solo se corren con transform; el orden real cambia recién al soltar.
 const AUTOSCROLL_EDGE = 56
 
-function EntryList({ entries, emptyText, onOpen, onReorder }) {
+function EntryList({ entries, onOpen, onReorder }) {
   const listRef = useRef(null)
   // lo que cambia en cada pointermove sin necesitar render propio
   const dragRef = useRef(null)
@@ -297,9 +297,6 @@ function EntryList({ entries, emptyText, onOpen, onReorder }) {
     return undefined
   }
 
-  if (entries.length === 0) {
-    return <p className="px-3 py-2 text-sm text-gray-400 dark:text-neutral-500">{emptyText}</p>
-  }
   return (
     <ul ref={listRef} className="divide-y divide-gray-100 dark:divide-neutral-700/60">
       {entries.map((entry, index) => (
@@ -323,6 +320,45 @@ function EntryList({ entries, emptyText, onOpen, onReorder }) {
   )
 }
 
+// el detalle de Ingresos/Gastos partido por período (1ª quincena, 2ª,
+// mes completo), cada uno con su subtotal y solo los que tienen algo. El
+// orden manual vale dentro de cada sección: arrastrar no cambia el período
+// (eso se cambia editando el movimiento).
+function PeriodSections({ entries, emptyText, onOpen, onReorder }) {
+  if (entries.length === 0) {
+    return <p className="px-3 py-2 text-sm text-gray-400 dark:text-neutral-500">{emptyText}</p>
+  }
+  return (
+    <>
+      {PERIODS.map((period) => {
+        const group = entries.filter((entry) => periodOf(entry) === period.id)
+        if (group.length === 0) return null
+        const subtotal = Math.round(group.reduce((sum, entry) => sum + entry.amount, 0) * 100) / 100
+        return (
+          <div key={period.id} className="mt-3 first:mt-2">
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-1.5 dark:bg-white/5">
+              <p className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-neutral-300">
+                {period.label}
+                <span className="ml-1.5 font-normal normal-case tracking-normal text-gray-400 dark:text-neutral-500">
+                  {period.range}
+                </span>
+              </p>
+              <p className="shrink-0 text-sm font-semibold tabular-nums text-gray-800 dark:text-neutral-100">
+                {formatMoney(subtotal)}
+              </p>
+            </div>
+            <EntryList
+              entries={group}
+              onOpen={onOpen}
+              onReorder={(entryId, toIndex) => onReorder(group, entryId, toIndex)}
+            />
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 // hoja para cargar/editar un movimiento: sube desde abajo en el celular
 // (donde llega el pulgar y el teclado no la tapa) y se centra desde sm:
 function EntrySheet({ entry, initialKind, month, categories, store, onClose, onSaved }) {
@@ -332,9 +368,8 @@ function EntrySheet({ entry, initialKind, month, categories, store, onClose, onS
   const [category, setCategory] = useState(entry?.category ?? '')
   const [recurring, setRecurring] = useState(entry?.recurring ?? false)
   const [endMonth, setEndMonth] = useState(entry?.endMonth ?? '')
-  // lo cargado antes de que existiera la quincena llega en null: queda sin
-  // marcar hasta que se elija una, en vez de asignarle una por las dudas
-  const [fortnight, setFortnight] = useState(entry ? entry.fortnight : defaultFortnight(month))
+  // 1, 2 o null (mes completo) — ver PERIODS
+  const [fortnight, setFortnight] = useState(entry ? (entry.fortnight ?? null) : defaultFortnight(month))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -461,20 +496,20 @@ function EntrySheet({ entry, initialKind, month, categories, store, onClose, onS
 
         <div className="mt-3">
           <span className="text-xs font-medium text-gray-500 dark:text-neutral-400">Quincena</span>
-          <div className="mt-1 grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-neutral-800">
-            {[1, 2].map((value) => (
+          <div className="mt-1 grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-neutral-800">
+            {PERIODS.map((period) => (
               <button
-                key={value}
+                key={period.id}
                 type="button"
-                onClick={() => setFortnight(value)}
-                aria-pressed={fortnight === value}
-                className={`cursor-pointer rounded-md py-1.5 text-sm ${
-                  fortnight === value
+                onClick={() => setFortnight(period.fortnight)}
+                aria-pressed={fortnight === period.fortnight}
+                className={`cursor-pointer rounded-md px-1 py-1.5 text-sm ${
+                  fortnight === period.fortnight
                     ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-neutral-700 dark:text-white'
                     : 'text-gray-500 dark:text-neutral-400'
                 }`}
               >
-                {value === 1 ? '1ª (1–15)' : '2ª (16–fin)'}
+                {period.option}
               </button>
             ))}
           </div>
@@ -654,6 +689,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
   const expenses = monthEntries.filter((entry) => entry.kind === 'expense')
   const totals = monthTotals(all, month)
   const status = balanceStatus(totals.balance)
+  const hasMonthly = totals.periods[0].count > 0
 
   const categories = useMemo(() => {
     const byKind = { income: new Set(DEFAULT_CATEGORIES.income), expense: new Set(DEFAULT_CATEGORIES.expense) }
@@ -778,19 +814,18 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <FortnightCard id={1} totals={totals.fortnights[1]} />
-                <FortnightCard id={2} totals={totals.fortnights[2]} />
+              {/* "Mes completo" solo si hay algo cargado así: en el celular
+                  ocupa una fila entera debajo de las dos quincenas */}
+              <div className={`mt-3 grid grid-cols-2 gap-2 ${hasMonthly ? 'sm:grid-cols-3' : ''}`}>
+                {PERIODS.filter((period) => period.id !== 0 || hasMonthly).map((period) => (
+                  <PeriodCard
+                    key={period.id}
+                    period={period}
+                    totals={totals.periods[period.id]}
+                    className={period.id === 0 ? 'col-span-2 sm:col-span-1' : ''}
+                  />
+                ))}
               </div>
-              {totals.fortnights[0].count > 0 && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-                  {totals.fortnights[0].count === 1
-                    ? '1 movimiento no tiene quincena'
-                    : `${totals.fortnights[0].count} movimientos no tienen quincena`}{' '}
-                  (ingresos {formatMoney(totals.fortnights[0].income)} · gastos {formatMoney(totals.fortnights[0].expense)})
-                  — tocalos en la lista para asignarles una.
-                </p>
-              )}
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
@@ -818,11 +853,11 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
 
               <div className="mt-6">
                 <SectionHeader kind="income" total={totals.income} detail={incomes.length > 0 && countLabel(incomes.length)} />
-                <EntryList
+                <PeriodSections
                   entries={incomes}
                   emptyText="Sin ingresos este mes."
                   onOpen={(entry) => setSheet({ entry, kind: entry.kind })}
-                  onReorder={(entryId, toIndex) => reorder(incomes, entryId, toIndex)}
+                  onReorder={reorder}
                 />
               </div>
 
@@ -835,11 +870,11 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
                     `Fijos ${formatMoney(totals.fixedExpense)} · Variables ${formatMoney(totals.variableExpense)}`
                   }
                 />
-                <EntryList
+                <PeriodSections
                   entries={expenses}
                   emptyText="Sin gastos este mes."
                   onOpen={(entry) => setSheet({ entry, kind: entry.kind })}
-                  onReorder={(entryId, toIndex) => reorder(expenses, entryId, toIndex)}
+                  onReorder={reorder}
                 />
               </div>
 

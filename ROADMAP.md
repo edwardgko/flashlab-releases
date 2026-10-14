@@ -438,6 +438,10 @@ Regla general: cada fase termina con la app usable y estable. No se adelanta có
   y con el dedo; el DnD nativo de HTML5 no funciona con touch en el WebView de Android).
   `sort_order` (`0030_finance_sort_order.sql`): al soltar cambia UNA fila (punto medio entre
   vecinas), así el orden del resto no se toca en otros meses. Flechas ↑/↓ sobre la manija.
+- v0.1.95: tercera opción "Mes completo" = `fortnight` null (sin migración: lo cargado antes de
+  la quincena también era null, y mes completo es justo lo que era — se fue el aviso de "sin
+  quincena"). El detalle de Ingresos y de Gastos va seccionado por período con subtotal; el
+  arrastre ordena dentro de cada sección (cambiar de período = editar el movimiento).
 - Se eligió una sección dedicada en vez de usar una base de datos de las existentes: la
   tabla no tiene sumas ni fórmulas, el filtro no se guarda y no hay filas que se repitan.
 
