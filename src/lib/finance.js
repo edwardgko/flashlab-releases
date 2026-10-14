@@ -7,7 +7,7 @@ import { supabase } from './supabaseClient.js'
 // del cliente: son unos cientos de filas en años de uso, y así el historial
 // no necesita una consulta por mes.
 
-const COLUMNS = 'id, kind, description, amount, category, start_month, recurring, end_month, created_at'
+const COLUMNS = 'id, kind, description, amount, category, start_month, recurring, end_month, fortnight, created_at'
 
 const FIELD_TO_COLUMN = {
   kind: 'kind',
@@ -17,6 +17,7 @@ const FIELD_TO_COLUMN = {
   startMonth: 'start_month',
   recurring: 'recurring',
   endMonth: 'end_month',
+  fortnight: 'fortnight',
 }
 
 async function currentUserId() {
@@ -36,6 +37,7 @@ const fromRow = (row) => ({
   startMonth: row.start_month,
   recurring: row.recurring,
   endMonth: row.end_month,
+  fortnight: row.fortnight ?? null,
   createdAt: row.created_at,
 })
 
@@ -111,25 +113,55 @@ export function appliesToMonth(entry, key) {
   return entry.startMonth <= key && (!entry.endMonth || key <= entry.endMonth)
 }
 
+// --- quincenas (0029_finance_fortnight.sql) ---
+
+export const FORTNIGHT_LABEL = { 1: '1ª quincena', 2: '2ª quincena' }
+export const FORTNIGHT_RANGE = { 1: 'días 1 al 15', 2: 'del 16 a fin de mes' }
+
+// para un movimiento nuevo: la quincena en curso si se está mirando el mes
+// actual, la primera si no
+export function defaultFortnight(viewMonth) {
+  return viewMonth === monthKey() && new Date().getDate() > 15 ? 2 : 1
+}
+
 export function monthTotals(entries, key) {
   let income = 0
   let fixedExpense = 0
   let variableExpense = 0
+  // 1 y 2 = quincenas; 0 = lo cargado antes de que existiera la quincena
+  const buckets = { 0: { income: 0, expense: 0, count: 0 }, 1: { income: 0, expense: 0, count: 0 }, 2: { income: 0, expense: 0, count: 0 } }
   for (const entry of entries) {
     if (!appliesToMonth(entry, key)) continue
-    if (entry.kind === 'income') income += entry.amount
-    else if (entry.recurring) fixedExpense += entry.amount
+    const bucket = buckets[entry.fortnight] ?? buckets[0]
+    bucket.count += 1
+    if (entry.kind === 'income') {
+      income += entry.amount
+      bucket.income += entry.amount
+      continue
+    }
+    bucket.expense += entry.amount
+    if (entry.recurring) fixedExpense += entry.amount
     else variableExpense += entry.amount
   }
   const expense = fixedExpense + variableExpense
   // redondeo a centavos: sumar decimales en float deja colas tipo 0.30000000000000004
   const round = (n) => Math.round(n * 100) / 100
+  const fortnights = {}
+  for (const [id, bucket] of Object.entries(buckets)) {
+    fortnights[id] = {
+      income: round(bucket.income),
+      expense: round(bucket.expense),
+      balance: round(bucket.income - bucket.expense),
+      count: bucket.count,
+    }
+  }
   return {
     income: round(income),
     expense: round(expense),
     fixedExpense: round(fixedExpense),
     variableExpense: round(variableExpense),
     balance: round(income - expense),
+    fortnights,
   }
 }
 
@@ -170,7 +202,7 @@ export function parseAmount(text) {
 // Devuelven { upserted, removedIds } para actualizar el estado local sin
 // volver a traer todo.
 
-const SAME_KEYS = ['kind', 'description', 'amount', 'category', 'recurring', 'endMonth']
+const SAME_KEYS = ['kind', 'description', 'amount', 'category', 'recurring', 'endMonth', 'fortnight']
 
 export async function saveEntry(store, original, draft, viewMonth) {
   const fields = {
@@ -180,6 +212,7 @@ export async function saveEntry(store, original, draft, viewMonth) {
     category: draft.category.trim(),
     recurring: draft.recurring,
     endMonth: draft.recurring ? draft.endMonth || null : null,
+    fortnight: draft.fortnight ?? null,
   }
   if (!original) {
     return { upserted: [await store.create({ ...fields, startMonth: viewMonth })], removedIds: [] }

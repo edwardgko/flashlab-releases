@@ -4,8 +4,11 @@ import { IS_CAPACITOR } from '../lib/supabaseClient.js'
 import { onReloadContent } from '../lib/liveSync.js'
 import {
   DEFAULT_CATEGORIES,
+  FORTNIGHT_LABEL,
+  FORTNIGHT_RANGE,
   addMonths,
   appliesToMonth,
+  defaultFortnight,
   formatMoney,
   formatPlain,
   monthKey,
@@ -63,7 +66,8 @@ function EntryRow({ entry, onOpen }) {
       ? `Fijo hasta ${monthLabel(entry.endMonth, { short: true })}`
       : 'Fijo'
     : null
-  const meta = [entry.category, fixedLabel].filter(Boolean).join(' · ')
+  const fortnightLabel = FORTNIGHT_LABEL[entry.fortnight] ?? 'Sin quincena'
+  const meta = [fortnightLabel, entry.category, fixedLabel].filter(Boolean).join(' · ')
   return (
     <li>
       <button
@@ -82,6 +86,35 @@ function EntryRow({ entry, onOpen }) {
         </span>
       </button>
     </li>
+  )
+}
+
+function FortnightCard({ id, totals }) {
+  const status = balanceStatus(totals.balance)
+  return (
+    <div className="rounded-xl border border-gray-200 p-3 dark:border-neutral-700">
+      <p className="text-sm font-medium text-gray-800 dark:text-neutral-100">{FORTNIGHT_LABEL[id]}</p>
+      <p className="text-[11px] text-gray-400 dark:text-neutral-500">{FORTNIGHT_RANGE[id]}</p>
+      <dl className="mt-2 space-y-1 text-xs">
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-400 dark:text-neutral-500">Ingresos</dt>
+          <dd className="tabular-nums text-gray-700 dark:text-neutral-200">{formatMoney(totals.income)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-400 dark:text-neutral-500">Gastos</dt>
+          <dd className="tabular-nums text-gray-700 dark:text-neutral-200">{formatMoney(totals.expense)}</dd>
+        </div>
+      </dl>
+      <div className="mt-2 flex items-center justify-between gap-1 border-t border-gray-100 pt-2 dark:border-neutral-700/60">
+        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${status.tone}`}>
+          <span aria-hidden="true">{status.icon}</span>
+          Saldo
+        </span>
+        <span className="truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+          {formatMoney(totals.balance)}
+        </span>
+      </div>
+    </div>
   )
 }
 
@@ -107,6 +140,9 @@ function EntrySheet({ entry, initialKind, month, categories, store, onClose, onS
   const [category, setCategory] = useState(entry?.category ?? '')
   const [recurring, setRecurring] = useState(entry?.recurring ?? false)
   const [endMonth, setEndMonth] = useState(entry?.endMonth ?? '')
+  // lo cargado antes de que existiera la quincena llega en null: queda sin
+  // marcar hasta que se elija una, en vez de asignarle una por las dudas
+  const [fortnight, setFortnight] = useState(entry ? entry.fortnight : defaultFortnight(month))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -156,7 +192,7 @@ function EntrySheet({ entry, initialKind, month, categories, store, onClose, onS
       setError(`El mes en que termina no puede ser anterior a ${monthLabel(month)}`)
       return
     }
-    run(() => saveEntry(store, entry, { kind, amount, description, category, recurring, endMonth }, month))
+    run(() => saveEntry(store, entry, { kind, amount, description, category, recurring, endMonth, fortnight }, month))
   }
 
   const inputClass =
@@ -230,6 +266,27 @@ function EntrySheet({ entry, initialKind, month, categories, store, onClose, onS
             ))}
           </datalist>
         </label>
+
+        <div className="mt-3">
+          <span className="text-xs font-medium text-gray-500 dark:text-neutral-400">Quincena</span>
+          <div className="mt-1 grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-neutral-800">
+            {[1, 2].map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFortnight(value)}
+                aria-pressed={fortnight === value}
+                className={`cursor-pointer rounded-md py-1.5 text-sm ${
+                  fortnight === value
+                    ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-neutral-700 dark:text-white'
+                    : 'text-gray-500 dark:text-neutral-400'
+                }`}
+              >
+                {value === 1 ? '1ª (1–15)' : '2ª (16–fin)'}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <label className="mt-4 flex cursor-pointer items-start gap-3">
           <input
@@ -382,7 +439,7 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
   const closeSheet = useCallback(() => setSheet(null), [])
 
   const all = entries ?? []
-  const monthEntries = all.filter((entry) => appliesToMonth(entry, month)).sort((a, b) => b.amount - a.amount)
+  const monthEntries = all.filter((entry) => appliesToMonth(entry, month)).sort((a, b) => (a.fortnight ?? 3) - (b.fortnight ?? 3) || b.amount - a.amount)
   const incomes = monthEntries.filter((entry) => entry.kind === 'income')
   const expenses = monthEntries.filter((entry) => entry.kind === 'expense')
   const totals = monthTotals(all, month)
@@ -510,6 +567,20 @@ export default function FinanceView({ insetLeft = false, store = supabaseFinance
                   </div>
                 </div>
               </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <FortnightCard id={1} totals={totals.fortnights[1]} />
+                <FortnightCard id={2} totals={totals.fortnights[2]} />
+              </div>
+              {totals.fortnights[0].count > 0 && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                  {totals.fortnights[0].count === 1
+                    ? '1 movimiento no tiene quincena'
+                    : `${totals.fortnights[0].count} movimientos no tienen quincena`}{' '}
+                  (ingresos {formatMoney(totals.fortnights[0].income)} · gastos {formatMoney(totals.fortnights[0].expense)})
+                  — tocalos en la lista para asignarles una.
+                </p>
+              )}
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button

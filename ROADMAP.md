@@ -431,6 +431,9 @@ Regla general: cada fase termina con la app usable y estable. No se adelanta có
 - Fijos ("se repite todos los meses") con fin opcional para cuotas. Editar o borrar un fijo
   desde un mes posterior NO reescribe el pasado: se cierra la fila vieja en el mes anterior
   y se abre una nueva (`saveEntry`/`removeEntry`).
+- v0.1.92: cada movimiento lleva quincena (1ª = días 1-15, 2ª = 16 a fin de mes,
+  `0029_finance_fortnight.sql`) y el resumen muestra ingresos/gastos/saldo de cada una. Lo
+  cargado antes queda "sin quincena" (aviso con el total) hasta editarlo — no se adivina.
 - Se eligió una sección dedicada en vez de usar una base de datos de las existentes: la
   tabla no tiene sumas ni fórmulas, el filtro no se guarda y no hay filas que se repitan.
 
