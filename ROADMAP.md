@@ -422,6 +422,20 @@ Regla general: cada fase termina con la app usable y estable. No se adelanta có
 
 ---
 
+## Finanzas — control de gastos mensuales ✅ (13-oct-2026, v0.1.91)
+
+- Pestaña propia "Finanzas" en el sidebar (`FinanceView.jsx` + `lib/finance.js`), tabla
+  `finance_entries` en Supabase (`0028_finance.sql`, solo el dueño ve sus filas).
+- Por mes: ingresos, gastos (fijos/variables), saldo con "te sobra"/"te falta", % gastado,
+  y tabla de los últimos 6 meses con el acumulado.
+- Fijos ("se repite todos los meses") con fin opcional para cuotas. Editar o borrar un fijo
+  desde un mes posterior NO reescribe el pasado: se cierra la fila vieja en el mes anterior
+  y se abre una nueva (`saveEntry`/`removeEntry`).
+- Se eligió una sección dedicada en vez de usar una base de datos de las existentes: la
+  tabla no tiene sumas ni fórmulas, el filtro no se guarda y no hay filas que se repitan.
+
+---
+
 ## Orden y dependencias
 
 ```

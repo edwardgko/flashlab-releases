@@ -25,6 +25,7 @@ const PagePeek = lazy(() => import('./components/PagePeek.jsx'))
 const CalendarView = lazy(() => import('./components/CalendarView.jsx'))
 const RecordingsView = lazy(() => import('./components/RecordingsView.jsx'))
 const ChatView = lazy(() => import('./components/ChatView.jsx'))
+const FinanceView = lazy(() => import('./components/FinanceView.jsx'))
 
 function SuspenseFallback() {
   return (
@@ -635,6 +636,7 @@ export default function App({ theme, setTheme }) {
     if (tab.kind === 'calendar') return 'Calendario'
     if (tab.kind === 'recordings') return 'Grabaciones'
     if (tab.kind === 'chat') return 'Chat'
+    if (tab.kind === 'finance') return 'Finanzas'
     const page = pages?.find((p) => p.id === tab.pageId)
     return page ? page.title || 'Sin título' : 'Página'
   }
@@ -745,6 +747,8 @@ export default function App({ theme, setTheme }) {
             recordingsActive={activeTab.kind === 'recordings'}
             onOpenChat={withSidebarClose(() => patchActiveTab({ kind: 'chat' }))}
             chatActive={activeTab.kind === 'chat'}
+            onOpenFinance={withSidebarClose(() => patchActiveTab({ kind: 'finance' }))}
+            financeActive={activeTab.kind === 'finance'}
             theme={theme}
             onCycleTheme={() => setTheme(THEME_CYCLE[theme])}
           />
@@ -790,6 +794,8 @@ export default function App({ theme, setTheme }) {
               <RecordingsView key={activeTab.id} insetLeft={!sidebarOpen} onOpenPage={selectPage} />
             ) : activeTab.kind === 'chat' ? (
               <ChatView key={activeTab.id} insetLeft={!sidebarOpen} sidebarOpen={sidebarOpen} />
+            ) : activeTab.kind === 'finance' ? (
+              <FinanceView key={activeTab.id} insetLeft={!sidebarOpen} />
             ) : current ? (
               <PageView
                 key={`${activeTab.id}:${current.id}`}

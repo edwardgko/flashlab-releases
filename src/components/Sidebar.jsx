@@ -76,6 +76,7 @@ const ICONS = {
   calendar: ['M8 2v4', 'M16 2v4', 'M4 8h16', 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z'],
   video: ['M4 6h11a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z', 'm16 10 5-3v10l-5-3'],
   chat: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
+  wallet: ['M19 7V5a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2', 'M3 6v12a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-3'],
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
   cloud: ['M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.2 9.2 4 4 0 0 0 7 19h10.5Z'],
   refresh: ['M20 11a8 8 0 1 0-.6 4', 'M20 5v6h-6'],
@@ -442,6 +443,8 @@ export default function Sidebar({
   recordingsActive,
   onOpenChat,
   chatActive,
+  onOpenFinance,
+  financeActive,
   theme,
   onCycleTheme,
   mobile = false,
@@ -1006,6 +1009,18 @@ export default function Sidebar({
               {chatUnread}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenFinance}
+          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+            financeActive
+              ? 'bg-gray-200 text-gray-700 dark:bg-neutral-700 dark:text-neutral-200'
+              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200'
+          }`}
+        >
+          <Icon d={ICONS.wallet} />
+          Finanzas
         </button>
       </div>
       <nav
